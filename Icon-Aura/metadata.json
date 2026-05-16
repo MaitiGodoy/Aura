@@ -1,0 +1,7 @@
+{
+  "name": " AURA Poliglota - Adrenaline English Coach",
+  "description": "High-performance, bio-hacking inspired English learning app for neurodivergent minds. Features real-time voice coaching, AI-generated visual anchors, and strategic tactical debriefs after every session.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
