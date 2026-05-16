@@ -72,7 +72,8 @@ export const MemorySystem = {
       name: username.charAt(0).toUpperCase() + username.slice(1),
       coins: 0,
       difficultyLevel: 'AUTO',
-      currentPhase: 'PHASE_0'
+      currentPhase: 'PHASE_0',
+      lastSeen: Date.now()
     };
 
     // Carrega o Graph State do usuário
@@ -86,7 +87,7 @@ export const MemorySystem = {
         knowledge_graph: {
           assimilated_concepts: [],
           current_weakness: [],
-          user_background: 'Não definido'
+          user_background: 'Interessado em Agentes Autônomos, Hard Sci-Fi e Negócios Digitais.'
         },
         next_action: 'START_PROMPT_DIRECT_LINE'
       };
@@ -261,6 +262,11 @@ export const MemorySystem = {
     
     [STATE SYNC PAYLOAD]
     ${graphPayload}
+    
+    === 🤖 AUTONOMOUS AGENT (AURA-AIM) ===
+    STATUS: ONLINE
+    MODULES: ScoutEngine (Context Harvesting), GraphArchitect (Curriculum Adjustment), Sentinel (Persistence)
+    CAPABILITIES: You can now trigger the 'request_autonomous_scout' tool to delegate research tasks to your background agent.
     
     USE ALL PERSISTENT CONTEXT TO TAILOR THE TEACHING.
     KEEP THE ENERGY AT MAXIMUM.

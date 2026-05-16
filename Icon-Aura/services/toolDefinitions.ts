@@ -80,11 +80,24 @@ export const recordGrammarGapTool: FunctionDeclaration = {
   }
 };
 
+export const requestAutonomousScoutTool: FunctionDeclaration = {
+  name: 'request_autonomous_scout',
+  description: 'Triggers the ScoutEngine to find real-world content for the next lesson.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      topic: { type: Type.STRING, description: 'The topic to research (e.g., "The Expanse politics", "SPIN Selling").' }
+    },
+    required: ['topic']
+  }
+};
+
 export const AURA_TOOLS = [
   renderCardTool, 
   switchModeTool, 
   analyzePronunciationTool, 
   triggerHomeworkTool, 
   recordGrammarGapTool, 
-  switchDifficultyTool
+  switchDifficultyTool,
+  requestAutonomousScoutTool
 ];

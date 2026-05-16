@@ -44,6 +44,7 @@ export interface UserProfile {
   coins: number; // Instant reward
   difficultyLevel?: 'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED' | 'NATIVE_SHOCK' | 'AUTO';
   currentPhase?: 'PHASE_0' | 'PHASE_1' | 'PHASE_2' | 'PHASE_3' | 'PHASE_4';
+  lastSeen?: number;
 }
 
 export interface AuraGraphState {
