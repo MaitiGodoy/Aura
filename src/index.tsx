@@ -1,10 +1,15 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import './index.css';
 import { AuraAgent } from './services/autonomousAgent';
 
 // Start the Autonomous Intelligence Module
-AuraAgent.start();
+try {
+  AuraAgent.start();
+} catch (e) {
+  console.error("AuraAgent failed to start:", e);
+}
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
