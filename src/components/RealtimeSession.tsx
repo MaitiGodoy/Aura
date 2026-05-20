@@ -20,9 +20,10 @@ interface RealtimeSessionProps {
 
 type LoopState = 'listening' | 'thinking' | 'speaking' | 'error';
 
-const SILENCE_THRESHOLD = 0.08;
-const SILENCE_DURATION_MS = 1200;
-const MIN_AUDIO_MS = 500;
+// VAD — tuned for fast response
+const SILENCE_THRESHOLD = 0.06;
+const SILENCE_DURATION_MS = 600;
+const MIN_AUDIO_MS = 300;
 
 const RealtimeSession: React.FC<RealtimeSessionProps> = ({ onExit, onFinish, selectedLanguage, character = 'aura' }) => {
   const [loopState, setLoopState] = useState<LoopState>('listening');
@@ -144,7 +145,7 @@ const RealtimeSession: React.FC<RealtimeSessionProps> = ({ onExit, onFinish, sel
     const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
     console.log(`[VAD] Audio blob size: ${audioBlob.size} bytes, chunks: ${chunksRef.current.length}`);
 
-    if (audioBlob.size < 2000) {
+    if (audioBlob.size < 500) {
       console.log('[VAD] Audio too short, restarting listen');
       isProcessingRef.current = false;
       if (isMountedRef.current) startListening();

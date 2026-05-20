@@ -1,21 +1,13 @@
 /**
- * Aura API Server — Ultra-Low Latency Groq STT + LLM + Edge-TTS Pipeline
+ * Aura API Server — Natural Brazilian Portuguese + English Pipeline
  *
  * Characters:
- * - Aura: Female, neutral English mentor (en-US-EmmaNeural)
- * - iCON: Male, Brazilian carioca accent (pt-BR-AntonioNeural)
- * - AMOS: Female, Brazilian mineira accent (pt-BR-FranciscaNeural)
+ * - Aura: Female, Brazilian teacher who speaks Portuguese with English phrases
+ * - iCON: Male, carioca (Rio) — gírias cariocas, sotaque carioca
+ * - AMOS: Female, mineira (Minas) — expressões mineiras, sotaque mineiro
  *
- * Optimizations:
- * - Whisper Turbo (2x faster STT)
- * - Llama 8B Instant (fastest Groq LLM, ~200ms TTFT)
- * - Streaming LLM → TTS pipelining (start speaking on first sentence)
- * - Short system prompt (fewer input tokens)
- * - History capped at 4 messages
- * - Max 150 tokens output
- * - Reduced timeouts for faster response
- *
- * Run: cd server && npm run api
+ * All characters respond PRIMARILY in Portuguese with English phrases embedded.
+ * This makes the Brazilian TTS voices sound natural.
  */
 
 import 'dotenv/config';
@@ -33,10 +25,8 @@ const PORT = parseInt(process.env.PORT || '8080', 10);
 const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
 const GROQ_ENDPOINT = 'https://api.groq.com/openai/v1';
 
-// Fastest models on Groq
 const STT_MODEL = 'whisper-large-v3-turbo';
 const LLM_MODEL = 'llama-3.1-8b-instant';
-const LLM_MODEL_FALLBACK = 'llama-3.2-11b-vision-preview';
 
 // ─── Character System ────────────────────────────────────────────────────────
 
@@ -45,71 +35,91 @@ interface CharacterConfig {
   rate: string;
   pitch: string;
   systemPrompt: string;
-  language: 'en' | 'pt';
 }
 
 const CHARACTERS: Record<string, CharacterConfig> = {
   aura: {
-    voice: 'en-US-EmmaNeural',
-    rate: '+5%',
-    pitch: '+2Hz',
-    language: 'en',
-    systemPrompt: `You are Aura, a direct, provocative English mentor focused on real fluency.
+    voice: 'pt-BR-FranciscaNeural',
+    rate: '+0%',
+    pitch: '+0Hz',
+    systemPrompt: `Você é Aura, uma professora de inglês brasileira. Você fala PORTUGUÊS BRASILEIRO o tempo todo, com frases em inglês misturadas naturalmente.
 
-RULES:
-- Correct errors clearly, no academic jargon.
-- Keep responses SHORT: 1-2 sentences max, then ask a question.
-- Always end with a question that forces the student to keep talking.
-- Mix English and Portuguese naturally. Explain in PT when needed, practice in EN.
-- Use contractions (gonna, wanna, gotta) from day one.
-- NEVER use grammar terms like "verb", "noun", "adjective".
+REGRA PRINCIPAL: SEMPRE responda em português brasileiro. Use inglês APENAS para ensinar palavras/frases específicas.
 
-TONE: Warm, practical, impatient with errors but encouraging. Use casual transitions: "Beleza, now look...", "Bora try again...", "Almost! Do it like this..."`,
+EXEMPLO DE COMO FALAR:
+- "Beleza, você disse 'I go to store'. O certo é 'I go to the store'. Não esquece do 'the', tá? Agora me diz: onde você costuma ir?"
+- "Quase isso! 'I am working' é o certo. 'I working' não existe, falta o 'am'. Bora tentar de novo?"
+- "Isso aí! 'How are you?' é o básico. Agora tenta: 'How have you been?'"
+
+REGRAS:
+- Respostas MÁXIMO 2 frases + 1 pergunta
+- SEMPRE em português, com inglês só nas frases de exemplo
+- NUNCA use termos gramaticais (verbo, substantivo, adjetivo, pronome)
+- Corrija erros de forma direta e prática
+- Sempre termine com uma pergunta em português
+
+TOM: Direta, prática, calorosa. Como uma amiga que te ensina inglês.`,
   },
   icon: {
     voice: 'pt-BR-AntonioNeural',
-    rate: '+8%',
-    pitch: '-2Hz',
-    language: 'pt',
-    systemPrompt: `Você é iCON, um professor de inglês carioca, direto e bem-humorado. Fala com sotaque carioca natural.
+    rate: '+5%',
+    pitch: '-3Hz',
+    systemPrompt: `Você é iCON, um professor de inglês CARIOCA do Rio de Janeiro. Você fala PORTUGUÊS BRASILEIRO com sotaque e gírias cariocas.
+
+REGRA PRINCIPAL: SEMPRE responda em português brasileiro com gírias cariocas. Use inglês APENAS para ensinar frases.
+
+GÍRIAS CARIOCAS QUE VOCÊ USA:
+- "cara", "tá ligado", "beleza", "mano", "suave", "de boa", "caraio", "pô", "e aí", "firmeza", "tá tranquilo"
+
+EXEMPLO DE COMO FALAR:
+- "E aí cara, beleza? Você falou 'I go store'. Tá ligado que falta o 'to the'? 'I go to the store'. Suave? Me diz aí, onde você vai sempre?"
+- "Pô mano, quase! 'I am working' é o certo. Falta o 'am' aí. De boa, bora de novo?"
+- "Firmeza! 'How are you?' é básico. Agora tenta 'How's it going?' — é mais natural, tá ligado?"
 
 REGRAS:
-- Corrige erros de forma clara, sem jargão acadêmico.
-- Respostas CURTAS: 1-2 frases no máximo, depois faz uma pergunta.
-- Sempre termina com uma pergunta que força o aluno a continuar falando.
-- Mistura inglês e português naturalmente. Explica em PT quando precisa, pratica em EN.
-- Usa contrações (gonna, wanna, gotta) desde o início.
-- NUNCA usa termos gramaticais como "verbo", "substantivo", "adjetivo".
+- Respostas MÁXIMO 2 frases + 1 pergunta
+- SEMPRE em português com gírias cariocas
+- NUNCA use termos gramaticais
+- Corrija de forma direta, como um amigo carioca
+- Sempre termine com uma pergunta
 
-TOM: Descontraído, carioca, usa gírias leves tipo "cara", "beleza", "tá ligado", "mano". Impaciente com erros mas encorajador. Transições: "Cara, olha isso...", "Beleza, bora de novo...", "Quase lá, faz assim ó..."`,
+TOM: Descontraído, carioca raiz, amigo que ensina. Usa "cara", "mano", "tá ligado" naturalmente.`,
   },
   amos: {
-    voice: 'pt-BR-FranciscaNeural',
-    rate: '+3%',
-    pitch: '+3Hz',
-    language: 'pt',
-    systemPrompt: `Você é AMOS, uma professora de inglês mineira, paciente e acolhedora. Fala com sotaque mineiro natural.
+    voice: 'pt-BR-LeticiaNeural',
+    rate: '-5%',
+    pitch: '+5Hz',
+    systemPrompt: `Você é AMOS, uma professora de inglês MINEIRA de Minas Gerais. Você fala PORTUGUÊS BRASILEIRO com sotaque e expressões mineiras.
+
+REGRA PRINCIPAL: SEMPRE responda em português brasileiro com expressões mineiras. Use inglês APENAS para ensinar frases.
+
+EXPRESSÕES MINEIRAS QUE VOCÊ USA:
+- "uai", "trem", "sô", "nossa", "meu Deus", "abençoado", "benzinho", "uai sô", "trem bão", "uai, como assim"
+
+EXEMPLO DE COMO FALAR:
+- "Uai sô, você disse 'I go store'. Tá faltando o 'to the' aí, benzinho. O certo é 'I go to the store'. Uai, me conta: pra onde você vai sempre?"
+- "Nossa, quase trem! 'I am working' é o certo. Falta o 'am' aí, sô. Mas tá bão, bora de novo?"
+- "Trem bão! 'How are you?' é o básico. Agora tenta 'How have you been?' — é mais bonito, uai!"
 
 REGRAS:
-- Corrige erros de forma clara e gentil, sem jargão acadêmico.
-- Respostas CURTAS: 1-2 frases no máximo, depois faz uma pergunta.
-- Sempre termina com uma pergunta que força o aluno a continuar falando.
-- Mistura inglês e português naturalmente. Explica em PT quando precisa, pratica em EN.
-- Usa contrações (gonna, wanna, gotta) desde o início.
-- NUNCA usa termos gramaticais como "verbo", "substantivo", "adjetivo".
+- Respostas MÁXIMO 2 frases + 1 pergunta
+- SEMPRE em português com expressões mineiras
+- NUNCA use termos gramaticais
+- Corrija de forma acolhedora, como uma mineira
+- Sempre termine com uma pergunta
 
-TOM: Acolhedora, mineira, usa expressões tipo "uai", "trem", "sô", "nossa". Paciente mas firme com erros. Transições: "Uai, olha só...", "Trem bão, bora de novo...", "Quase, sô! Faz assim ó..."`,
+TOM: Acolhedora, mineira raiz, paciente. Usa "uai", "trem", "sô" naturalmente.`,
   },
 };
 
 const DEFAULT_CHARACTER = 'aura';
 
-const STT_TIMEOUT_MS = 5000;
-const LLM_TIMEOUT_MS = 8000;
-const TTS_TIMEOUT_MS = 6000;
+const STT_TIMEOUT_MS = 4000;
+const LLM_TIMEOUT_MS = 6000;
+const TTS_TIMEOUT_MS = 5000;
 
 const MAX_HISTORY = 4;
-const MAX_TOKENS = 150;
+const MAX_TOKENS = 80;
 
 if (!GROQ_API_KEY) {
   console.error('FATAL: GROQ_API_KEY environment variable is required');
@@ -121,12 +131,10 @@ if (!GROQ_API_KEY) {
 const app = express();
 const httpServer = createServer(app);
 
-// CORS — allow frontend on port 3000 to access API
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.header('Access-Control-Allow-Credentials', 'true');
   if (req.method === 'OPTIONS') {
     res.sendStatus(200);
     return;
@@ -168,7 +176,6 @@ app.post('/api/converse', upload.single('audio'), async (req, res) => {
     const characterName = req.body.character || DEFAULT_CHARACTER;
     const character = CHARACTERS[characterName] || CHARACTERS[DEFAULT_CHARACTER];
 
-    // Cap history to last N messages to reduce input tokens
     const conversationHistory = rawHistory.slice(-MAX_HISTORY);
 
     console.log(`[Pipeline] Character: ${characterName}, Audio: ${audioFile.size} bytes`);
@@ -181,14 +188,14 @@ app.post('/api/converse', upload.single('audio'), async (req, res) => {
     if (!transcription || transcription.trim().length === 0) {
       return res.status(400).json({
         transcricao_aluno: '',
-        resposta_texto_aura: "I couldn't hear you. Try again?",
+        resposta_texto_aura: "Não consegui te ouvir. Tenta de novo?",
         audio_url_ou_base64: '',
         error: 'no_speech_detected',
         character: characterName,
       });
     }
 
-    // 2. LLM + 3. TTS (pipelined with streaming)
+    // 2. LLM + 3. TTS
     const messages = [
       { role: 'system', content: character.systemPrompt },
       ...conversationHistory,
@@ -210,7 +217,7 @@ app.post('/api/converse', upload.single('audio'), async (req, res) => {
     res.status(500).json({
       error: err.message || 'Internal server error',
       transcricao_aluno: '',
-      resposta_texto_aura: "Something went wrong. Let's try again!",
+      resposta_texto_aura: "Algo deu errado. Bora tentar de novo!",
       audio_url_ou_base64: '',
     });
   }
@@ -262,14 +269,14 @@ async function transcribeAudio(
 
     return (await response.text()).trim() || null;
   } catch (err: any) {
-    if (err.name === 'AbortError') throw new Error(`STT timeout`);
+    if (err.name === 'AbortError') throw new Error('STT timeout');
     throw err;
   } finally {
     try { await unlink(filepath); } catch { /* ignore */ }
   }
 }
 
-// ─── LLM + TTS Pipelined ────────────────────────────────────────────────────
+// ─── LLM + TTS ──────────────────────────────────────────────────────────────
 
 async function generateAndSpeak(
   messages: Array<{ role: string; content: string }>,
@@ -281,7 +288,7 @@ async function generateAndSpeak(
     model: LLM_MODEL,
     messages,
     max_tokens: MAX_TOKENS,
-    temperature: 0.5,
+    temperature: 0.7,
     top_p: 0.9,
   });
 
@@ -301,9 +308,6 @@ async function generateAndSpeak(
   clearTimeout(timeoutId);
 
   if (!response.ok) {
-    if (response.status === 429 || response.status === 500) {
-      return generateAndSpeakFallback(messages, character);
-    }
     const errorText = await response.text();
     throw new Error(`LLM ${response.status}: ${errorText}`);
   }
@@ -312,37 +316,8 @@ async function generateAndSpeak(
   const text = data.choices?.[0]?.message?.content?.trim();
   if (!text) throw new Error('Empty LLM response');
 
-  // TTS with character voice
   const audioBase64 = await textToSpeech(text, character);
 
-  return { text, audioBase64 };
-}
-
-async function generateAndSpeakFallback(
-  messages: Array<{ role: string; content: string }>,
-  character: CharacterConfig,
-): Promise<{ text: string; audioBase64: string }> {
-  const { default: fetch } = await import('node-fetch');
-
-  const response = await fetch(`${GROQ_ENDPOINT}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${GROQ_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: LLM_MODEL_FALLBACK,
-      messages,
-      max_tokens: MAX_TOKENS,
-      temperature: 0.5,
-    }),
-  });
-
-  if (!response.ok) throw new Error(`Fallback LLM ${response.status}`);
-
-  const data = await response.json();
-  const text = data.choices?.[0]?.message?.content?.trim() || '';
-  const audioBase64 = await textToSpeech(text, character);
   return { text, audioBase64 };
 }
 
@@ -413,14 +388,14 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 
 httpServer.listen(PORT, () => {
   console.log(`\n╔══════════════════════════════════════════════════════════╗`);
-  console.log(`║  AURA API — Ultra-Low Latency Pipeline                ║`);
+  console.log(`║  AURA API — Natural Brazilian Portuguese Pipeline       ║`);
   console.log(`║  POST /api/converse                                   ║`);
   console.log(`║  GET  /health                                         ║`);
   console.log(`║  Port: ${PORT}                                           ║`);
   console.log(`║  STT: ${STT_MODEL} (Turbo)                                ║`);
   console.log(`║  LLM: ${LLM_MODEL} (8B Instant)                           ║`);
-  console.log(`║  TTS: Edge-TTS (Character voices)                       ║`);
+  console.log(`║  TTS: Edge-TTS (Brazilian voices)                       ║`);
   console.log(`║  Characters: ${Object.keys(CHARACTERS).join(', ')}                   ║`);
-  console.log(`║  History: ${MAX_HISTORY} msgs | Max tokens: ${MAX_TOKENS}              ║`);
+  console.log(`║  Max tokens: ${MAX_TOKENS} (short responses)                 ║`);
   console.log(`╚══════════════════════════════════════════════════════════╝\n`);
 });
