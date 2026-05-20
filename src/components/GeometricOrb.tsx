@@ -1,4 +1,5 @@
 import React, { useRef, useEffect } from 'react';
+import { CharacterName, CHARACTERS } from '../services/groqPipeline';
 
 type OrbState = 'idle' | 'listening' | 'speaking';
 
@@ -6,11 +7,14 @@ interface Props {
   state?: OrbState;
   amplitude?: number;
   className?: string;
+  character?: CharacterName;
 }
 
-const GeometricOrb: React.FC<Props> = ({ state = 'idle', amplitude = 0, className = '' }) => {
+const GeometricOrb: React.FC<Props> = ({ state = 'idle', amplitude = 0, className = '', character = 'aura' }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const frameRef = useRef(0);
+
+  const charInfo = CHARACTERS[character] || CHARACTERS.aura;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -28,7 +32,7 @@ const GeometricOrb: React.FC<Props> = ({ state = 'idle', amplitude = 0, classNam
         canvas.height = 844;
       }
     };
-    
+
     resizeCanvas();
     window.addEventListener('resize', resizeCanvas);
 
@@ -45,33 +49,33 @@ const GeometricOrb: React.FC<Props> = ({ state = 'idle', amplitude = 0, classNam
       const time = Date.now() / 1000;
       const baseRadius = 94;
 
-      let primaryColor = 'rgba(255, 255, 255, 0.5)';
-      let secondaryColor = 'rgba(255, 255, 255, 0.2)';
+      let primaryColor = charInfo.orbIdle;
+      let secondaryColor = `rgba(255, 255, 255, 0.2)`;
       let shadowColor = '#ffffff';
 
       if (state === 'speaking') {
-        primaryColor = 'rgba(34, 197, 94, 0.9)';
-        secondaryColor = 'rgba(16, 185, 129, 0.6)';
-        shadowColor = '#22c55e';
+        primaryColor = charInfo.orbSpeaking;
+        secondaryColor = charInfo.orbSpeaking.replace('0.9', '0.6');
+        shadowColor = charInfo.color;
       } else if (state === 'listening') {
-        primaryColor = 'rgba(250, 204, 21, 0.9)';
-        secondaryColor = 'rgba(245, 158, 11, 0.6)';
-        shadowColor = '#facc15';
+        primaryColor = charInfo.orbListening;
+        secondaryColor = charInfo.orbListening.replace('0.9', '0.6');
+        shadowColor = charInfo.color;
       }
 
       // Draw smoke rings
       for (let layer = 0; layer < 2; layer++) {
         ctx.save();
         ctx.beginPath();
-        
+
         const numPoints = 120;
         const layerPhase = layer * Math.PI;
-        const waveAmplitude = state === 'speaking' 
-          ? 18 * amplitude 
-          : state === 'listening' 
-          ? 8 * amplitude 
+        const waveAmplitude = state === 'speaking'
+          ? 18 * amplitude
+          : state === 'listening'
+          ? 8 * amplitude
           : 3;
-        
+
         ctx.lineWidth = layer === 0 ? 3.5 : 2;
         ctx.strokeStyle = layer === 0 ? primaryColor : secondaryColor;
         ctx.shadowBlur = state === 'idle' ? 5 : 20;
@@ -83,9 +87,9 @@ const GeometricOrb: React.FC<Props> = ({ state = 'idle', amplitude = 0, classNam
           const noiseFreq2 = state === 'speaking' ? 3 : 2;
           const speed = state === 'speaking' ? 14 : 5;
 
-          const noise = Math.sin(theta * noiseFreq1 + time * speed + layerPhase) * 0.6 + 
+          const noise = Math.sin(theta * noiseFreq1 + time * speed + layerPhase) * 0.6 +
                         Math.cos(theta * noiseFreq2 - time * (speed * 0.75) + layerPhase) * 0.4;
-          
+
           const r = baseRadius + noise * waveAmplitude;
           const x = cx + r * Math.cos(theta);
           const y = cy + r * Math.sin(theta);
@@ -108,7 +112,7 @@ const GeometricOrb: React.FC<Props> = ({ state = 'idle', amplitude = 0, classNam
       cancelAnimationFrame(frameRef.current);
       window.removeEventListener('resize', resizeCanvas);
     };
-  }, [state, amplitude]);
+  }, [state, amplitude, character, charInfo]);
 
   return (
     <div className={`absolute inset-0 w-full h-full pointer-events-none z-10 ${className}`}>
@@ -116,9 +120,9 @@ const GeometricOrb: React.FC<Props> = ({ state = 'idle', amplitude = 0, classNam
         ref={canvasRef}
         className="absolute inset-0 w-full h-full pointer-events-none z-0"
       />
-      
+
       {/* Clean center circle - no photo */}
-      <div 
+      <div
         className="absolute pointer-events-none rounded-full z-10 flex items-center justify-center"
         style={{
           top: '50%',
@@ -127,15 +131,15 @@ const GeometricOrb: React.FC<Props> = ({ state = 'idle', amplitude = 0, classNam
           width: '180px',
           height: '180px',
           borderRadius: '50%',
-          background: state === 'listening' 
-            ? 'radial-gradient(circle, rgba(250,204,21,0.12) 0%, transparent 70%)' 
-            : state === 'speaking' 
-            ? `radial-gradient(circle, rgba(34,197,94,${0.08 + amplitude * 0.12}) 0%, transparent 70%)` 
-            : 'radial-gradient(circle, rgba(255,255,255,0.06) 0%, transparent 70%)',
-          boxShadow: state === 'listening' 
-            ? '0 0 35px rgba(250, 204, 21, 0.15)' 
-            : state === 'speaking' 
-            ? `0 0 ${35 + amplitude * 35}px rgba(34, 197, 94, ${0.15 + amplitude * 0.25})` 
+          background: state === 'listening'
+            ? `radial-gradient(circle, ${charInfo.orbListening.replace('0.9', '0.12')} 0%, transparent 70%)`
+            : state === 'speaking'
+            ? `radial-gradient(circle, ${charInfo.orbSpeaking.replace('0.9', '0.08')} 0%, transparent 70%)`
+            : `radial-gradient(circle, rgba(255,255,255,0.06) 0%, transparent 70%)`,
+          boxShadow: state === 'listening'
+            ? `0 0 35px ${charInfo.color}25`
+            : state === 'speaking'
+            ? `0 0 ${35 + amplitude * 35}px ${charInfo.color}${Math.floor((0.15 + amplitude * 0.25) * 255).toString(16).padStart(2, '0')}`
             : '0 0 25px rgba(255, 255, 255, 0.08)',
         }}
       />

@@ -1,7 +1,7 @@
 /** RealtimeSession — Conversação automática com VAD (detecção de silêncio) */
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { GroqPipeline, ConverseResponse } from '../services/groqPipeline';
+import { GroqPipeline, ConverseResponse, CharacterName, CHARACTERS, CharacterInfo } from '../services/groqPipeline';
 import { MemorySystem } from '../services/memorySystem';
 import { SoundService } from '../services/soundEffects';
 import { Vibration } from '../services/vibrationService';
@@ -15,6 +15,7 @@ interface RealtimeSessionProps {
   onFinish: (report: any) => void;
   selectedLanguage: string;
   initialMode?: string;
+  character?: CharacterName;
 }
 
 type LoopState = 'listening' | 'thinking' | 'speaking' | 'error';
@@ -23,7 +24,7 @@ const SILENCE_THRESHOLD = 0.08;
 const SILENCE_DURATION_MS = 1200;
 const MIN_AUDIO_MS = 500;
 
-const RealtimeSession: React.FC<RealtimeSessionProps> = ({ onExit, onFinish, selectedLanguage }) => {
+const RealtimeSession: React.FC<RealtimeSessionProps> = ({ onExit, onFinish, selectedLanguage, character = 'aura' }) => {
   const [loopState, setLoopState] = useState<LoopState>('listening');
   const [caption, setCaption] = useState('');
   const [auraText, setAuraText] = useState('');
@@ -31,6 +32,8 @@ const RealtimeSession: React.FC<RealtimeSessionProps> = ({ onExit, onFinish, sel
   const [wordsPracticed, setWordsPracticed] = useState(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [currentAmplitude, setCurrentAmplitude] = useState(0);
+
+  const charInfo = CHARACTERS[character] || CHARACTERS.aura;
 
   const streamRef = useRef<MediaStream | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -140,7 +143,7 @@ const RealtimeSession: React.FC<RealtimeSessionProps> = ({ onExit, onFinish, sel
 
     const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
     console.log(`[VAD] Audio blob size: ${audioBlob.size} bytes, chunks: ${chunksRef.current.length}`);
-    
+
     if (audioBlob.size < 2000) {
       console.log('[VAD] Audio too short, restarting listen');
       isProcessingRef.current = false;
@@ -152,7 +155,7 @@ const RealtimeSession: React.FC<RealtimeSessionProps> = ({ onExit, onFinish, sel
     SoundService.playClick();
 
     try {
-      const result: ConverseResponse = await GroqPipeline.converse(audioBlob, historyRef.current);
+      const result: ConverseResponse = await GroqPipeline.converse(audioBlob, historyRef.current, character);
 
       if (!isMountedRef.current) return;
 
@@ -200,7 +203,7 @@ const RealtimeSession: React.FC<RealtimeSessionProps> = ({ onExit, onFinish, sel
         isProcessingRef.current = false;
       }
     }
-  }, [startListening, stopAll]);
+  }, [startListening, stopAll, character]);
 
   const handleFinish = useCallback(() => {
     stopAll();
@@ -227,20 +230,24 @@ const RealtimeSession: React.FC<RealtimeSessionProps> = ({ onExit, onFinish, sel
 
       {/* Progress bar */}
       <div className="absolute top-0 left-0 w-full h-1 bg-gray-900 z-50">
-        <div className="h-full bg-gradient-to-r from-green-500 to-yellow-400 transition-all duration-300" style={{ width: `${Math.min((sessionDuration / 3600) * 100, 100)}%` }} />
+        <div className="h-full transition-all duration-300" style={{ width: `${Math.min((sessionDuration / 3600) * 100, 100)}%`, background: `linear-gradient(to right, ${charInfo.color}, ${charInfo.accentColor})` }} />
       </div>
 
       {/* Timer */}
       <div className="absolute top-4 left-4 z-50">
         <span className="text-gray-500 font-mono text-[10px] uppercase tracking-widest">Session</span>
-        <div className="text-white font-mono text-sm mt-0.5">{Math.floor(sessionDuration / 60)}:{String(Math.floor(sessionDuration % 60)).padStart(2, '0')}</div>
+        <div className="font-mono text-sm mt-0.5" style={{ color: charInfo.color }}>{Math.floor(sessionDuration / 60)}:{String(Math.floor(sessionDuration % 60)).padStart(2, '0')}</div>
       </div>
 
       {/* Exit */}
       <button onClick={handleFinish} className="absolute top-3 right-3 z-[120] bg-black/60 backdrop-blur text-white border border-white/20 px-3 py-1.5 text-[10px] font-bold rounded-full hover:bg-white/10 transition-all">FINISH →</button>
 
-      {/* Orb */}
-      <GeometricOrb state={getOrbState()} amplitude={currentAmplitude} />
+      {/* Orb with character colors */}
+      <GeometricOrb
+        state={getOrbState()}
+        amplitude={currentAmplitude}
+        character={character}
+      />
 
       {/* User caption */}
       {caption && (
@@ -254,8 +261,8 @@ const RealtimeSession: React.FC<RealtimeSessionProps> = ({ onExit, onFinish, sel
       {/* Aura response */}
       {auraText && loopState !== 'listening' && (
         <div className="absolute z-40 flex justify-center px-4 pointer-events-none" style={{ bottom: '80px', left: '50%', transform: 'translateX(-50%)', width: 'calc(100% - 32px)' }}>
-          <div className="w-full max-w-lg bg-green-500/10 backdrop-blur-sm rounded-lg p-3 border border-green-500/20">
-            <div className="text-[9px] font-mono text-green-400 uppercase tracking-widest mb-1">AURA</div>
+          <div className="w-full max-w-lg backdrop-blur-sm rounded-lg p-3 border" style={{ backgroundColor: `${charInfo.color}10`, borderColor: `${charInfo.color}30` }}>
+            <div className="text-[9px] font-mono uppercase tracking-widest mb-1" style={{ color: charInfo.color }}>{charInfo.label}</div>
             <div className="text-sm text-white/90 leading-relaxed">{auraText}</div>
           </div>
         </div>
@@ -265,20 +272,20 @@ const RealtimeSession: React.FC<RealtimeSessionProps> = ({ onExit, onFinish, sel
       <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-50">
         {loopState === 'listening' && (
           <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-yellow-400 animate-pulse" />
-            <span className="text-[10px] font-mono text-yellow-400 uppercase tracking-widest">Listening...</span>
+            <div className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: charInfo.orbListening }} />
+            <span className="text-[10px] font-mono uppercase tracking-widest" style={{ color: charInfo.orbListening }}>Listening...</span>
           </div>
         )}
         {loopState === 'thinking' && (
           <div className="flex items-center gap-2">
-            <div className="w-4 h-4 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
-            <span className="text-[10px] font-mono text-cyan-400 uppercase tracking-widest">Thinking...</span>
+            <div className="w-4 h-4 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: charInfo.color, borderTopColor: 'transparent' }} />
+            <span className="text-[10px] font-mono uppercase tracking-widest" style={{ color: charInfo.color }}>Thinking...</span>
           </div>
         )}
         {loopState === 'speaking' && (
           <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-            <span className="text-[10px] font-mono text-green-400 uppercase tracking-widest">Speaking...</span>
+            <div className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: charInfo.orbSpeaking }} />
+            <span className="text-[10px] font-mono uppercase tracking-widest" style={{ color: charInfo.orbSpeaking }}>Speaking...</span>
           </div>
         )}
         {loopState === 'error' && (
@@ -291,7 +298,7 @@ const RealtimeSession: React.FC<RealtimeSessionProps> = ({ onExit, onFinish, sel
 
       {/* Exchanges counter */}
       <div className="absolute bottom-8 right-4 z-50 text-right">
-        <div className="text-green-400 font-display font-black text-xl">{wordsPracticed}</div>
+        <div className="font-display font-black text-xl" style={{ color: charInfo.color }}>{wordsPracticed}</div>
         <div className="text-gray-600 font-mono text-[9px] uppercase">Exchanges</div>
       </div>
     </div>

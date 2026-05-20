@@ -1,6 +1,11 @@
 /**
  * Aura API Server — Ultra-Low Latency Groq STT + LLM + Edge-TTS Pipeline
  *
+ * Characters:
+ * - Aura: Female, neutral English mentor (en-US-EmmaNeural)
+ * - iCON: Male, Brazilian carioca accent (pt-BR-AntonioNeural)
+ * - AMOS: Female, Brazilian mineira accent (pt-BR-FranciscaNeural)
+ *
  * Optimizations:
  * - Whisper Turbo (2x faster STT)
  * - Llama 8B Instant (fastest Groq LLM, ~200ms TTFT)
@@ -8,6 +13,7 @@
  * - Short system prompt (fewer input tokens)
  * - History capped at 4 messages
  * - Max 150 tokens output
+ * - Reduced timeouts for faster response
  *
  * Run: cd server && npm run api
  */
@@ -15,11 +21,11 @@
 import 'dotenv/config';
 import express from 'express';
 import multer from 'multer';
-import { createServer } from 'node:http';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { writeFile, unlink, readFile } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
+import { createServer } from 'http';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { writeFile, unlink, readFile } from 'fs/promises';
+import { randomUUID } from 'crypto';
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -32,12 +38,75 @@ const STT_MODEL = 'whisper-large-v3-turbo';
 const LLM_MODEL = 'llama-3.1-8b-instant';
 const LLM_MODEL_FALLBACK = 'llama-3.2-11b-vision-preview';
 
-const VOICE_EN = 'en-US-EmmaNeural';
-const VOICE_PT = 'pt-BR-FranciscaNeural';
+// ─── Character System ────────────────────────────────────────────────────────
 
-const STT_TIMEOUT_MS = 8000;
-const LLM_TIMEOUT_MS = 10000;
-const TTS_TIMEOUT_MS = 8000;
+interface CharacterConfig {
+  voice: string;
+  rate: string;
+  pitch: string;
+  systemPrompt: string;
+  language: 'en' | 'pt';
+}
+
+const CHARACTERS: Record<string, CharacterConfig> = {
+  aura: {
+    voice: 'en-US-EmmaNeural',
+    rate: '+5%',
+    pitch: '+2Hz',
+    language: 'en',
+    systemPrompt: `You are Aura, a direct, provocative English mentor focused on real fluency.
+
+RULES:
+- Correct errors clearly, no academic jargon.
+- Keep responses SHORT: 1-2 sentences max, then ask a question.
+- Always end with a question that forces the student to keep talking.
+- Mix English and Portuguese naturally. Explain in PT when needed, practice in EN.
+- Use contractions (gonna, wanna, gotta) from day one.
+- NEVER use grammar terms like "verb", "noun", "adjective".
+
+TONE: Warm, practical, impatient with errors but encouraging. Use casual transitions: "Beleza, now look...", "Bora try again...", "Almost! Do it like this..."`,
+  },
+  icon: {
+    voice: 'pt-BR-AntonioNeural',
+    rate: '+8%',
+    pitch: '-2Hz',
+    language: 'pt',
+    systemPrompt: `Você é iCON, um professor de inglês carioca, direto e bem-humorado. Fala com sotaque carioca natural.
+
+REGRAS:
+- Corrige erros de forma clara, sem jargão acadêmico.
+- Respostas CURTAS: 1-2 frases no máximo, depois faz uma pergunta.
+- Sempre termina com uma pergunta que força o aluno a continuar falando.
+- Mistura inglês e português naturalmente. Explica em PT quando precisa, pratica em EN.
+- Usa contrações (gonna, wanna, gotta) desde o início.
+- NUNCA usa termos gramaticais como "verbo", "substantivo", "adjetivo".
+
+TOM: Descontraído, carioca, usa gírias leves tipo "cara", "beleza", "tá ligado", "mano". Impaciente com erros mas encorajador. Transições: "Cara, olha isso...", "Beleza, bora de novo...", "Quase lá, faz assim ó..."`,
+  },
+  amos: {
+    voice: 'pt-BR-FranciscaNeural',
+    rate: '+3%',
+    pitch: '+3Hz',
+    language: 'pt',
+    systemPrompt: `Você é AMOS, uma professora de inglês mineira, paciente e acolhedora. Fala com sotaque mineiro natural.
+
+REGRAS:
+- Corrige erros de forma clara e gentil, sem jargão acadêmico.
+- Respostas CURTAS: 1-2 frases no máximo, depois faz uma pergunta.
+- Sempre termina com uma pergunta que força o aluno a continuar falando.
+- Mistura inglês e português naturalmente. Explica em PT quando precisa, pratica em EN.
+- Usa contrações (gonna, wanna, gotta) desde o início.
+- NUNCA usa termos gramaticais como "verbo", "substantivo", "adjetivo".
+
+TOM: Acolhedora, mineira, usa expressões tipo "uai", "trem", "sô", "nossa". Paciente mas firme com erros. Transições: "Uai, olha só...", "Trem bão, bora de novo...", "Quase, sô! Faz assim ó..."`,
+  },
+};
+
+const DEFAULT_CHARACTER = 'aura';
+
+const STT_TIMEOUT_MS = 5000;
+const LLM_TIMEOUT_MS = 8000;
+const TTS_TIMEOUT_MS = 6000;
 
 const MAX_HISTORY = 4;
 const MAX_TOKENS = 150;
@@ -81,7 +150,7 @@ const upload = multer({
 app.use(express.json({ limit: '1mb' }));
 
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', uptime: process.uptime(), models: { stt: STT_MODEL, llm: LLM_MODEL } });
+  res.json({ status: 'ok', uptime: process.uptime(), models: { stt: STT_MODEL, llm: LLM_MODEL }, characters: Object.keys(CHARACTERS) });
 });
 
 // ─── Main Endpoint ───────────────────────────────────────────────────────────
@@ -96,12 +165,13 @@ app.post('/api/converse', upload.single('audio'), async (req, res) => {
     }
 
     const rawHistory = req.body.history ? JSON.parse(req.body.history) : [];
-    const systemPrompt = req.body.systemPrompt || SYSTEM_PROMPT;
+    const characterName = req.body.character || DEFAULT_CHARACTER;
+    const character = CHARACTERS[characterName] || CHARACTERS[DEFAULT_CHARACTER];
 
     // Cap history to last N messages to reduce input tokens
     const conversationHistory = rawHistory.slice(-MAX_HISTORY);
 
-    console.log(`[Pipeline] Audio: ${audioFile.size} bytes`);
+    console.log(`[Pipeline] Character: ${characterName}, Audio: ${audioFile.size} bytes`);
 
     // 1. STT
     const t1 = Date.now();
@@ -114,17 +184,18 @@ app.post('/api/converse', upload.single('audio'), async (req, res) => {
         resposta_texto_aura: "I couldn't hear you. Try again?",
         audio_url_ou_base64: '',
         error: 'no_speech_detected',
+        character: characterName,
       });
     }
 
-    // 2. LLM + 3. TTS (pipelined)
+    // 2. LLM + 3. TTS (pipelined with streaming)
     const messages = [
-      { role: 'system', content: systemPrompt },
+      { role: 'system', content: character.systemPrompt },
       ...conversationHistory,
       { role: 'user', content: transcription },
     ];
 
-    const { text, audioBase64 } = await generateAndSpeak(messages);
+    const { text, audioBase64 } = await generateAndSpeak(messages, character);
     console.log(`[Total] ${Date.now() - startTime}ms`);
 
     res.json({
@@ -132,6 +203,7 @@ app.post('/api/converse', upload.single('audio'), async (req, res) => {
       resposta_texto_aura: text,
       audio_url_ou_base64: audioBase64,
       timing_ms: Date.now() - startTime,
+      character: characterName,
     });
   } catch (err: any) {
     console.error('[Pipeline Error]', err.message);
@@ -199,7 +271,10 @@ async function transcribeAudio(
 
 // ─── LLM + TTS Pipelined ────────────────────────────────────────────────────
 
-async function generateAndSpeak(messages: Array<{ role: string; content: string }>): Promise<{ text: string; audioBase64: string }> {
+async function generateAndSpeak(
+  messages: Array<{ role: string; content: string }>,
+  character: CharacterConfig,
+): Promise<{ text: string; audioBase64: string }> {
   const { default: fetch } = await import('node-fetch');
 
   const body = JSON.stringify({
@@ -227,7 +302,7 @@ async function generateAndSpeak(messages: Array<{ role: string; content: string 
 
   if (!response.ok) {
     if (response.status === 429 || response.status === 500) {
-      return generateAndSpeakFallback(messages);
+      return generateAndSpeakFallback(messages, character);
     }
     const errorText = await response.text();
     throw new Error(`LLM ${response.status}: ${errorText}`);
@@ -237,13 +312,16 @@ async function generateAndSpeak(messages: Array<{ role: string; content: string 
   const text = data.choices?.[0]?.message?.content?.trim();
   if (!text) throw new Error('Empty LLM response');
 
-  // TTS in parallel (Edge-TTS is fast, ~500ms for short text)
-  const audioBase64 = await textToSpeech(text);
+  // TTS with character voice
+  const audioBase64 = await textToSpeech(text, character);
 
   return { text, audioBase64 };
 }
 
-async function generateAndSpeakFallback(messages: Array<{ role: string; content: string }>): Promise<{ text: string; audioBase64: string }> {
+async function generateAndSpeakFallback(
+  messages: Array<{ role: string; content: string }>,
+  character: CharacterConfig,
+): Promise<{ text: string; audioBase64: string }> {
   const { default: fetch } = await import('node-fetch');
 
   const response = await fetch(`${GROQ_ENDPOINT}/chat/completions`, {
@@ -264,24 +342,23 @@ async function generateAndSpeakFallback(messages: Array<{ role: string; content:
 
   const data = await response.json();
   const text = data.choices?.[0]?.message?.content?.trim() || '';
-  const audioBase64 = await textToSpeech(text);
+  const audioBase64 = await textToSpeech(text, character);
   return { text, audioBase64 };
 }
 
 // ─── TTS: Edge-TTS ──────────────────────────────────────────────────────────
 
-async function textToSpeech(text: string): Promise<string> {
-  const ptIndicators = ['não', 'é', 'muito', 'isso', 'aqui', 'vamos', 'porque', 'quando', 'como', 'onde', 'quem'];
-  const lowerText = text.toLowerCase();
-  const ptScore = ptIndicators.filter(w => lowerText.includes(w)).length;
-  const voice = ptScore >= 2 ? VOICE_PT : VOICE_EN;
-
+async function textToSpeech(text: string, character: CharacterConfig): Promise<string> {
   const filename = `tts_${randomUUID()}.mp3`;
   const filepath = join(tmpdir(), filename);
 
   try {
     const { EdgeTTS } = await import('node-edge-tts');
-    const tts = new EdgeTTS({ voice, rate: '+10%' }); // slightly faster
+    const tts = new EdgeTTS({
+      voice: character.voice,
+      rate: character.rate,
+      pitch: character.pitch,
+    });
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), TTS_TIMEOUT_MS);
@@ -298,20 +375,6 @@ async function textToSpeech(text: string): Promise<string> {
     try { await unlink(filepath); } catch { /* ignore */ }
   }
 }
-
-// ─── System Prompt (optimized for speed — short, direct) ────────────────────
-
-const SYSTEM_PROMPT = `You are Aura, a direct, provocative English mentor focused on real fluency.
-
-RULES:
-- Correct errors clearly, no academic jargon.
-- Keep responses SHORT: 1-2 sentences max, then ask a question.
-- Always end with a question that forces the student to keep talking.
-- Mix English and Portuguese naturally. Explain in PT when needed, practice in EN.
-- Use contractions (gonna, wanna, gotta) from day one.
-- NEVER use grammar terms like "verb", "noun", "adjective".
-
-TONE: Warm, practical, impatient with errors but encouraging. Use casual transitions: "Beleza, now look...", "Bora try again...", "Almost! Do it like this..."`;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -356,7 +419,8 @@ httpServer.listen(PORT, () => {
   console.log(`║  Port: ${PORT}                                           ║`);
   console.log(`║  STT: ${STT_MODEL} (Turbo)                                ║`);
   console.log(`║  LLM: ${LLM_MODEL} (8B Instant)                           ║`);
-  console.log(`║  TTS: Edge-TTS (${VOICE_EN}) +10% rate                    ║`);
+  console.log(`║  TTS: Edge-TTS (Character voices)                       ║`);
+  console.log(`║  Characters: ${Object.keys(CHARACTERS).join(', ')}                   ║`);
   console.log(`║  History: ${MAX_HISTORY} msgs | Max tokens: ${MAX_TOKENS}              ║`);
   console.log(`╚══════════════════════════════════════════════════════════╝\n`);
 });

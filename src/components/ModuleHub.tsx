@@ -3,11 +3,12 @@ import { getAvailableLanguages } from '../services/languageEngine';
 import { getCurriculum, getTranslatedTag, IconItem } from '../services/curriculum';
 import { LiveGameMode } from '../types';
 import { SoundService } from '../services/soundEffects';
+import { CharacterName, CHARACTERS } from '../services/groqPipeline';
 
 interface Props {
   selectedLanguage: string;
   onLanguageChange: (lang: string) => void;
-  onSelectModule: (mode: LiveGameMode) => void;
+  onSelectModule: (mode: LiveGameMode, character?: CharacterName) => void;
   onLogout: () => void;
 }
 
@@ -24,7 +25,8 @@ const ModuleHub: React.FC<Props> = ({ selectedLanguage, onLanguageChange, onSele
       subtitle: 'Free Conversation',
       description: 'Speak naturally. No script, no limits.',
       mode: 'FREE_TALK' as LiveGameMode,
-      color: '#00FFFF',
+      character: 'aura' as CharacterName,
+      color: CHARACTERS.aura.color,
       icon: '◇',
     },
     {
@@ -33,7 +35,8 @@ const ModuleHub: React.FC<Props> = ({ selectedLanguage, onLanguageChange, onSele
       subtitle: 'Structured Lessons',
       description: 'Follow a curriculum. Step by step.',
       mode: 'ICON_MODE' as LiveGameMode,
-      color: '#E6E6FA',
+      character: 'icon' as CharacterName,
+      color: CHARACTERS.icon.color,
       icon: '◎',
     },
     {
@@ -42,7 +45,8 @@ const ModuleHub: React.FC<Props> = ({ selectedLanguage, onLanguageChange, onSele
       subtitle: 'Spaced Repetition',
       description: 'Lock in what you learned. Memory engine.',
       mode: 'BRAINSCAPE' as LiveGameMode,
-      color: '#00FFFF',
+      character: 'amos' as CharacterName,
+      color: CHARACTERS.amos.color,
       icon: '◇',
     },
   ];
@@ -74,7 +78,7 @@ const ModuleHub: React.FC<Props> = ({ selectedLanguage, onLanguageChange, onSele
                         onClick={() => {
                           SoundService.playClick();
                           setSelectedIcon(iconItem);
-                          onSelectModule('ICON_MODE');
+                          onSelectModule('ICON_MODE', 'icon');
                         }}
                         className={`w-full text-left px-3 py-2 rounded-lg border transition-all group flex justify-between items-center text-sm ${selectedIcon?.id === iconItem.id ? 'bg-blue-500/15 border-blue-500/40' : 'bg-white/[0.02] border-transparent hover:bg-white/5 hover:border-white/10'}`}
                       >
@@ -145,7 +149,7 @@ const ModuleHub: React.FC<Props> = ({ selectedLanguage, onLanguageChange, onSele
                   setShowCurriculum(true);
                 } else {
                   SoundService.playClick();
-                  onSelectModule(mod.mode);
+                  onSelectModule(mod.mode, mod.character);
                 }
               }}
               className="relative group overflow-hidden text-white font-black p-6 rounded-xl hover:scale-[1.02] active:scale-[0.98] transition-all text-left border bg-black"

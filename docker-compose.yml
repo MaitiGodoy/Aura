@@ -1,12 +1,10 @@
-version: '3.8'
-
 services:
   frontend:
     build:
       context: .
       dockerfile: Dockerfile.frontend
-    expose:
-      - "80"
+    ports:
+      - "80:80"
     depends_on:
       - api
     restart: unless-stopped
@@ -20,15 +18,4 @@ services:
     environment:
       - GROQ_API_KEY=${GROQ_API_KEY}
       - PORT=8080
-    restart: unless-stopped
-
-  nginx:
-    image: nginx:alpine
-    ports:
-      - "80:80"
-    volumes:
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf
-    depends_on:
-      - frontend
-      - api
     restart: unless-stopped

@@ -8,6 +8,7 @@ import AuraBackground from './components/AuraBackground';
 import DiagnosticPanel from './components/DiagnosticPanel';
 import { AppState, UserProfile, SessionReport, LiveGameMode, IconItem } from './types';
 import { MemorySystem } from './services/memorySystem';
+import { CharacterName } from './services/groqPipeline';
 
 const App: React.FC = () => {
   const [state, setState] = useState<AppState>(AppState.IDLE);
@@ -16,6 +17,7 @@ const App: React.FC = () => {
   const [showDiagnostic, setShowDiagnostic] = useState(false);
   const [initialMode, setInitialMode] = useState<LiveGameMode>('FREE_TALK');
   const [selectedIcon, setSelectedIcon] = useState<IconItem | null>(null);
+  const [activeCharacter, setActiveCharacter] = useState<CharacterName>('aura');
   const tapCountRef = useRef(0);
   const tapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -30,8 +32,9 @@ const App: React.FC = () => {
     setState(AppState.HUB);
   };
 
-  const handleSelectModule = (mode: LiveGameMode) => {
+  const handleSelectModule = (mode: LiveGameMode, character?: CharacterName) => {
     setInitialMode(mode);
+    setActiveCharacter(character || 'aura');
     setState(AppState.LIVE_SESSION);
   };
 
@@ -80,16 +83,17 @@ const App: React.FC = () => {
                       onLogout={handleLogout}
                   />
                )}
-               
+
                {state === AppState.LIVE_SESSION && (
                   <RealtimeSession
                       onFinish={handleSessionFinish}
                       onExit={handleSessionExit}
                       selectedLanguage={selectedLanguage}
                       initialMode={initialMode}
+                      character={activeCharacter}
                   />
                )}
-               
+
                {state === AppState.SESSION_SUMMARY && lastSessionReport && (
                   <SessionSummary report={lastSessionReport} onClose={handleSessionExit} />
                )}
