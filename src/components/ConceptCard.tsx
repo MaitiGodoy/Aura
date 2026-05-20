@@ -179,6 +179,20 @@ const ConceptCard: React.FC<Props> = ({ data, isVisible, onClose, onResult, onRe
             </div>
           )}
 
+          {data.exampleSentence && (!isBrainscape || showResult) && (
+            <div className="mt-3 p-3 rounded-xl bg-white/5 border border-white/10 text-left">
+              <div className="text-[8px] font-mono text-white/40 uppercase mb-1 tracking-[0.2em]">FRASE COMPLETA</div>
+              <div className="text-sm font-bold text-white leading-relaxed mb-1">
+                "{data.exampleSentence}"
+              </div>
+              {data.exampleTranslation && (
+                <div className="text-xs text-white/50 italic">
+                  "{data.exampleTranslation}"
+                </div>
+              )}
+            </div>
+          )}
+
           {isBrainscape && !showResult && (
             <div className="text-sm text-white/20 italic mb-3">...</div>
           )}
@@ -274,14 +288,32 @@ const ConceptCard: React.FC<Props> = ({ data, isVisible, onClose, onResult, onRe
             )}
 
             {(!isBrainscape || (showResult && (tensesCompleted || !isCorrect))) && (
-              <div className="flex items-start gap-2 bg-white/5 p-3 rounded-xl border-l-4" style={{ borderColor }}>
-                <span className="text-xs mt-0.5" style={{ color: borderColor }}>⌖</span>
-                <div>
-                  <div className="text-[8px] font-mono text-white/40 uppercase mb-0.5 tracking-[0.2em]">MISSÃO</div>
-                  <div className="text-xs font-black text-white italic leading-tight">
-                    {data.context || "Memorize isso agora."}
+              <div className="space-y-2">
+                <div className="flex items-start gap-2 bg-white/5 p-3 rounded-xl border-l-4" style={{ borderColor }}>
+                  <span className="text-xs mt-0.5" style={{ color: borderColor }}>⌖</span>
+                  <div>
+                    <div className="text-[8px] font-mono text-white/40 uppercase mb-0.5 tracking-[0.2em]">MISSÃO</div>
+                    <div className="text-xs font-black text-white italic leading-tight">
+                      {data.context || "Memorize isso agora."}
+                    </div>
                   </div>
                 </div>
+                {!isBrainscape && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={handleDontKnow}
+                      className="bg-white/5 hover:bg-white/10 text-white/60 font-bold py-3 rounded-xl transition-all active:scale-95 border border-white/10 text-[10px]"
+                    >
+                      NÃO SEI
+                    </button>
+                    <button
+                      onClick={onClose}
+                      className="bg-cyan-500 hover:bg-cyan-400 text-black font-black py-3 rounded-xl transition-all active:scale-95 shadow-[0_0_20px_rgba(0,240,255,0.4)] text-[10px]"
+                    >
+                      ENTENDI →
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 

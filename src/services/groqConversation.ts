@@ -92,13 +92,13 @@ class GroqConversationEngine {
     si = si.replace('{{MEMORY_CONTEXT}}', MemorySystem.getContextPrompt());
 
     si += `\n\nTOOL CALL INSTRUCTION: When you need to perform a UI action, include EXACTLY one of these markers in your response:
-- To show a concept card: [TOOL:render_concept_card {"term":"...","definition":"...","phonetic":"...","instruction":"...","cardType":"VOCAB","semanticColor":"blue","hint":"description without revealing the word"}]
+- To show a concept card: [TOOL:render_concept_card {"term":"...","definition":"...","phonetic":"...","instruction":"...","cardType":"VOCAB","semanticColor":"blue","hint":"description without revealing the word","exampleSentence":"complete sentence using the term","exampleTranslation":"Portuguese translation of the sentence"}]
 - To switch mode: [TOOL:switch_game_mode {"mode":"VOCAB_FOCUS"}]
 - To record a grammar gap: [TOOL:record_grammar_gap {"gap":"..."}]
 - To trigger homework: [TOOL:trigger_homework {"exercise":"..."}]
 - To switch difficulty: [TOOL:switch_difficulty {"level":"BEGINNER"}]
-- To analyze pronunciation: [TOOL:analyze_pronunciation {"targetWord":"...","userPhonetic":"...","accuracyScore":75,"feedback":"..."}]
-The marker will be parsed and the tool executed. Do NOT mention the marker itself to the user. Speak naturally around it. You may fire at most ONE tool per response.`;
+- To analyze pronunciation: [TOOL:analyze_pronunciation {"targetWord":"...","userPhonetic":"...","accuracyScore":75,"feedback":"detailed coaching feedback","syllableBreakdown":[{"syllable":"ta","correct":true},{"syllable":"ble","correct":false,"tip":"use softer L"}],"specificErrors":["L sound too hard, soften it"],"nativePhonetic":"tá-bou"}]
+The marker will be parsed and the tool executed. Do NOT mention the marker itself to the user. Speak naturally around it. You may fire at most ONE tool per response. ALWAYS include exampleSentence on concept cards. ALWAYS include syllableBreakdown and specificErrors on pronunciation feedback.`;
 
     this.messages = [{ role: 'system', content: si }];
 

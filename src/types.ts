@@ -12,6 +12,8 @@ export interface ConceptCardData {
   semanticColor?: SemanticColor;
   hint?: string;
   isChallenge?: boolean;
+  exampleSentence?: string;
+  exampleTranslation?: string;
 }
 
 export interface ChatMessage {
@@ -56,6 +58,9 @@ export interface PronunciationFeedback {
   userPhonetic: string;
   accuracyScore: number;
   feedback: string;
+  syllableBreakdown?: { syllable: string; correct: boolean; tip?: string }[];
+  specificErrors?: string[];
+  nativePhonetic?: string;
 }
 
 export interface SessionReport {

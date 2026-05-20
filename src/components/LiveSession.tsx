@@ -279,6 +279,8 @@ const LiveSession: React.FC<Props> = ({ onCardTrigger, onFinish, onExit, isCardV
             type: (tool.args.cardType || 'VOCAB') as any,
             semanticColor: tool.args.semanticColor as any,
             hint: tool.args.hint,
+            exampleSentence: tool.args.exampleSentence,
+            exampleTranslation: tool.args.exampleTranslation,
           });
           sessionCardsRef.current.push({
             term: tool.args.term,
@@ -288,6 +290,8 @@ const LiveSession: React.FC<Props> = ({ onCardTrigger, onFinish, onExit, isCardV
             type: (tool.args.cardType || 'VOCAB') as any,
             semanticColor: tool.args.semanticColor as any,
             hint: tool.args.hint,
+            exampleSentence: tool.args.exampleSentence,
+            exampleTranslation: tool.args.exampleTranslation,
           });
           break;
         case 'switch_game_mode':
@@ -687,6 +691,8 @@ const LiveSession: React.FC<Props> = ({ onCardTrigger, onFinish, onExit, isCardV
                                 type: args.cardType || 'VOCAB',
                                 semanticColor: args.semanticColor as any,
                                 hint: args.hint,
+                                exampleSentence: args.exampleSentence,
+                                exampleTranslation: args.exampleTranslation,
                             };
                             onCardTrigger(card);
                             sessionCardsRef.current.push(card);
@@ -714,7 +720,10 @@ const LiveSession: React.FC<Props> = ({ onCardTrigger, onFinish, onExit, isCardV
                                 targetWord: args.targetWord,
                                 userPhonetic: args.userPhonetic,
                                 accuracyScore: args.accuracyScore,
-                                feedback: args.feedback
+                                feedback: args.feedback,
+                                syllableBreakdown: args.syllableBreakdown,
+                                specificErrors: args.specificErrors,
+                                nativePhonetic: args.nativePhonetic,
                             });
                             Vibration.pronunciation(args.accuracyScore);
                             responses.push({ name: fc.name, id: fc.id, response: { result: "Feedback Shown" } });
