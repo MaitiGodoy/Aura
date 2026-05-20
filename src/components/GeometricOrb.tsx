@@ -46,18 +46,22 @@ const GeometricOrb: React.FC<Props> = ({ state = 'idle', amplitude = 0, classNam
       const time = Date.now() / 1000;
       const baseRadius = 94; // slightly larger than avatar 90px radius
 
-      let primaryColor = 'rgba(0, 240, 255, 0.85)'; // speaking / cyan
-      let secondaryColor = 'rgba(168, 85, 247, 0.6)'; // purple
-      let shadowColor = '#00f0ff';
+      let primaryColor = 'rgba(34, 197, 94, 0.9)'; // green
+      let secondaryColor = 'rgba(16, 185, 129, 0.6)'; // emerald
+      let shadowColor = '#22c55e';
 
-      if (state === 'listening') {
-        primaryColor = 'rgba(255, 215, 0, 0.9)'; // gold
+      if (state === 'speaking') {
+        primaryColor = 'rgba(34, 197, 94, 0.9)'; // green
+        secondaryColor = 'rgba(16, 185, 129, 0.6)'; // emerald
+        shadowColor = '#22c55e';
+      } else if (state === 'listening') {
+        primaryColor = 'rgba(250, 204, 21, 0.9)'; // yellow
         secondaryColor = 'rgba(245, 158, 11, 0.6)'; // amber
-        shadowColor = '#ffd700';
+        shadowColor = '#facc15';
       } else if (state === 'idle') {
-        primaryColor = 'rgba(230, 230, 250, 0.45)'; // lavender
-        secondaryColor = 'rgba(255, 255, 255, 0.15)';
-        shadowColor = '#e6e6fa';
+        primaryColor = 'rgba(255, 255, 255, 0.5)'; // white
+        secondaryColor = 'rgba(255, 255, 255, 0.2)';
+        shadowColor = '#ffffff';
       }
 
       // Draw two layered glowing waveforms
@@ -137,10 +141,10 @@ const GeometricOrb: React.FC<Props> = ({ state = 'idle', amplitude = 0, classNam
           width: '180px',
           height: '180px',
           boxShadow: state === 'listening' 
-            ? '0 0 35px rgba(255, 215, 0, 0.5), inset 0 0 15px rgba(255, 215, 0, 0.3)' 
+            ? '0 0 35px rgba(250, 204, 21, 0.5), inset 0 0 15px rgba(250, 204, 21, 0.3)' 
             : state === 'speaking' 
-            ? `0 0 ${35 + amplitude * 35}px rgba(0, 240, 255, ${0.4 + amplitude * 0.4}), inset 0 0 15px rgba(0, 240, 255, 0.3)` 
-            : '0 0 25px rgba(230, 230, 250, 0.25), inset 0 0 10px rgba(255, 255, 255, 0.1)',
+            ? `0 0 ${35 + amplitude * 35}px rgba(34, 197, 94, ${0.4 + amplitude * 0.4}), inset 0 0 15px rgba(34, 197, 94, 0.3)` 
+            : '0 0 25px rgba(255, 255, 255, 0.25), inset 0 0 10px rgba(255, 255, 255, 0.1)',
         }}
       >
         <img 

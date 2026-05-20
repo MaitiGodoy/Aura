@@ -586,11 +586,11 @@ const LiveSession: React.FC<Props> = ({ onCardTrigger, onFinish, onExit, isCardV
                                             return trimmed ? `${trimmed} ${word}` : word;
                                         });
                                     }
-                                }, idx * 400);
+                                }, idx * 700);
                                 captionTimeoutsRef.current.push(timeoutId);
                             });
                         }
-                    }, 800);
+                    }, 1200);
                 }
 
                 if (msg.serverContent?.interrupted) {
@@ -652,7 +652,7 @@ const LiveSession: React.FC<Props> = ({ onCardTrigger, onFinish, onExit, isCardV
                         const now = outputCtx.currentTime;
                         const startDelay = Math.max(0, (firstBufferScheduledTime - now) * 1000);
                         
-                        const targetMsPerWord = 450;
+                        const targetMsPerWord = 700;
                         const maxWords = Math.ceil((totalAudioDuration * 1000) / targetMsPerWord);
                         const wordsToScheduleCount = Math.min(pendingWordsRef.current.length, maxWords);
 
@@ -1147,25 +1147,25 @@ const LiveSession: React.FC<Props> = ({ onCardTrigger, onFinish, onExit, isCardV
 
       {showCurriculum && (
           <div className="absolute inset-0 z-[110] flex items-center justify-center bg-black/95 backdrop-blur-2xl p-4 sm:p-6 overflow-y-auto">
-              <div className="w-full max-w-2xl bg-[#0a0a1a] border-2 border-blue-500 shadow-[0_0_80px_rgba(59,130,246,0.3)] rounded-3xl p-6 sm:p-8 flex flex-col max-h-[90vh]">
+              <div className="w-full max-w-lg bg-[#0a0a1a] border border-white/10 shadow-[0_0_80px_rgba(59,130,246,0.2)] rounded-2xl p-5 flex flex-col max-h-[85vh]">
                   
-                  <div className="flex justify-between items-center mb-8">
+                  <div className="flex justify-between items-center mb-5">
                       <div>
-                          <h2 className="text-2xl font-bold text-white uppercase tracking-tighter leading-none">{curriculum.title}</h2>
-                          <p className="text-[10px] text-gray-500 font-mono mt-2 tracking-wider">All levels. One flow. No gates.</p>
+                          <h2 className="text-lg font-bold text-white uppercase tracking-tighter leading-none">{curriculum.title}</h2>
+                          <p className="text-[9px] text-gray-500 font-mono mt-1 tracking-wider">All levels. One flow. No gates.</p>
                       </div>
-                      <button onClick={() => setShowCurriculum(false)} className="text-gray-500 hover:text-white text-3xl">✕</button>
+                      <button onClick={() => setShowCurriculum(false)} className="text-gray-500 hover:text-white text-xl w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/5 transition-all">✕</button>
                   </div>
 
-                  <div className="flex-1 overflow-y-auto pr-2 space-y-6 custom-scrollbar">
+                  <div className="flex-1 overflow-y-auto pr-1 space-y-4 custom-scrollbar">
                       {curriculum.modules.map((module) => (
-                          <div key={module.id} className="space-y-3">
-                              <h3 className="text-blue-400 font-mono text-[10px] uppercase tracking-[0.3em] font-bold">{module.title}</h3>
-                              <div className="grid gap-2">
+                          <div key={module.id} className="space-y-1.5">
+                              <h3 className="text-blue-400/70 font-mono text-[9px] uppercase tracking-[0.2em] font-bold">{module.title}</h3>
+                              <div className="grid gap-1">
                                    {module.iconItems.map((iconItem) => {
                                        const levelTag = iconItem.tags?.[0] || 'BASIC';
                                        const displayedTag = getTranslatedTag(levelTag, selectedLanguage);
-                                       const tagColor = levelTag === 'ADVANCED' ? 'text-red-400 border-red-500/30' : levelTag === 'INTERMEDIATE' ? 'text-yellow-400 border-yellow-500/30' : 'text-green-400 border-green-500/30';
+                                       const tagColor = levelTag === 'ADVANCED' ? 'text-red-400/70 border-red-500/20 bg-red-500/5' : levelTag === 'INTERMEDIATE' ? 'text-yellow-400/70 border-yellow-500/20 bg-yellow-500/5' : 'text-green-400/70 border-green-500/20 bg-green-500/5';
                                        return (
                                        <button 
                                          key={iconItem.id}
@@ -1179,16 +1179,16 @@ const LiveSession: React.FC<Props> = ({ onCardTrigger, onFinish, onExit, isCardV
                                                  })).catch(() => {});
                                              }
                                          }}
-                                         className={`w-full text-left p-4 rounded-xl border border-white/5 hover:border-blue-500/50 hover:bg-blue-500/10 transition-all group flex justify-between items-center ${selectedIcon?.id === iconItem.id ? 'bg-blue-500/20 border-blue-500' : 'bg-white/5'}`}
+                                         className={`w-full text-left px-3 py-2 rounded-lg border transition-all group flex justify-between items-center text-sm ${selectedIcon?.id === iconItem.id ? 'bg-blue-500/15 border-blue-500/40' : 'bg-white/[0.02] border-transparent hover:bg-white/5 hover:border-white/10'}`}
                                        >
-                                           <div className="flex flex-col gap-1">
+                                           <div className="flex flex-col gap-0.5 min-w-0 flex-1">
                                                <div className="flex items-center gap-2">
-                                                   <span className="text-white font-bold text-base leading-tight group-hover:text-blue-300 transition-colors">{iconItem.title}</span>
-                                                   <span className={`text-[8px] font-mono px-1.5 py-0.5 rounded border ${tagColor}`}>{displayedTag}</span>
+                                                   <span className="text-white/90 font-semibold text-[13px] leading-tight truncate group-hover:text-blue-300 transition-colors">{iconItem.title}</span>
+                                                   <span className={`text-[8px] font-mono px-1 py-px rounded border shrink-0 ${tagColor}`}>{displayedTag}</span>
                                                </div>
-                                               <span className="text-[10px] text-gray-500 font-mono group-hover:text-gray-400">{iconItem.topics.join(' • ')}</span>
+                                               <span className="text-[9px] text-gray-600 font-mono truncate">{iconItem.topics.join(' • ')}</span>
                                            </div>
-                                           <span className="text-xl opacity-0 group-hover:opacity-100 transition-opacity">→</span>
+                                           <span className="text-white/20 text-sm opacity-0 group-hover:opacity-100 transition-opacity ml-2 shrink-0">→</span>
                                        </button>
                                    )})}
                               </div>
@@ -1196,8 +1196,8 @@ const LiveSession: React.FC<Props> = ({ onCardTrigger, onFinish, onExit, isCardV
                       ))}
                   </div>
 
-                  <div className="mt-8 pt-6 border-t border-white/10 flex justify-center">
-                    <p className="text-[10px] text-gray-600 font-mono uppercase tracking-widest italic">No levels. No gates. Just progress.</p>
+                  <div className="mt-5 pt-4 border-t border-white/5 flex justify-center">
+                    <p className="text-[9px] text-gray-600 font-mono uppercase tracking-widest italic">No levels. No gates. Just progress.</p>
                   </div>
               </div>
           </div>
