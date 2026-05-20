@@ -1,6 +1,6 @@
 /** GroqPipeline — Frontend service for the Groq + Edge-TTS API server */
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+const API_BASE = import.meta.env.VITE_API_URL || '';
 
 export interface ConverseResponse {
   transcricao_aluno: string;
@@ -18,17 +18,25 @@ export class GroqPipeline {
       formData.append('history', JSON.stringify(history));
     }
 
+    console.log('[GroqPipeline] Sending audio to API:', audioBlob.size, 'bytes');
+    console.log('[GroqPipeline] API URL:', `${API_BASE}/api/converse`);
+
     const response = await fetch(`${API_BASE}/api/converse`, {
       method: 'POST',
       body: formData,
     });
 
+    console.log('[GroqPipeline] Response status:', response.status);
+
     if (!response.ok) {
       const error = await response.json();
+      console.error('[GroqPipeline] API error:', error);
       throw new Error(error.error || `API request failed (${response.status})`);
     }
 
-    return response.json();
+    const result = await response.json();
+    console.log('[GroqPipeline] Success:', result.transcricao_aluno?.substring(0, 50));
+    return result;
   }
 
   static playAudio(base64Audio: string): Promise<void> {

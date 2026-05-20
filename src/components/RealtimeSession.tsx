@@ -139,7 +139,10 @@ const RealtimeSession: React.FC<RealtimeSessionProps> = ({ onExit, onFinish, sel
     stopAll();
 
     const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
+    console.log(`[VAD] Audio blob size: ${audioBlob.size} bytes, chunks: ${chunksRef.current.length}`);
+    
     if (audioBlob.size < 2000) {
+      console.log('[VAD] Audio too short, restarting listen');
       isProcessingRef.current = false;
       if (isMountedRef.current) startListening();
       return;
