@@ -1,13 +1,30 @@
 {
-  "name": "aura-ws-server",
-  "version": "1.0.0",
+  "name": "aura-api-server",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "api": "tsx api-server.ts",
+    "api:dev": "tsx --watch api-server.ts",
+    "build": "tsc"
   },
   "dependencies": {
+    "dotenv": "^17.4.2",
+    "express": "^4.21.0",
+    "form-data": "^4.0.1",
+    "multer": "^1.4.5-lts.1",
+    "node-edge-tts": "^1.2.10",
+    "node-fetch": "^3.3.2",
     "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/multer": "^1.4.12",
+    "@types/node": "^22.10.0",
+    "@types/ws": "^8.5.13",
+    "tsx": "^4.19.2",
+    "typescript": "~5.8.2"
   }
 }
