@@ -34,6 +34,8 @@ export enum AppState {
   SESSION_HISTORY = 'SESSION_HISTORY'
 }
 
+export type LiveGameMode = 'FREE_TALK' | 'VOCAB_FOCUS' | 'GRAMMAR_PRACTICE' | 'RAPID_DRILL' | 'DECODE' | 'ICON_MODE' | 'BRAINSCAPE';
+
 export interface AuthState {
   isAuthenticated: boolean;
   email: string | null;
@@ -70,4 +72,12 @@ export interface SessionReport {
   difficultyLevel?: string;
   aiBrief?: string;
   timestamp?: number;
+}
+
+export interface IconItem {
+  id: string;
+  title: string;
+  topics: string[];
+  description?: string;
+  tags?: ('BASIC' | 'INTERMEDIATE' | 'ADVANCED')[];
 }

@@ -1,12 +1,12 @@
 import React, { useState, useRef } from 'react';
 import ModuleHub from './components/ModuleHub';
-import GroqSession from './components/GroqSession';
+import RealtimeSession from './components/RealtimeSession';
 import LoginScreen from './components/LoginScreen';
 import SessionSummary from './components/SessionSummary';
 import SessionHistory from './components/SessionHistory';
 import AuraBackground from './components/AuraBackground';
 import DiagnosticPanel from './components/DiagnosticPanel';
-import { AppState, UserProfile, SessionReport } from './types';
+import { AppState, UserProfile, SessionReport, LiveGameMode, IconItem } from './types';
 import { MemorySystem } from './services/memorySystem';
 
 const App: React.FC = () => {
@@ -14,6 +14,8 @@ const App: React.FC = () => {
   const [selectedLanguage, setSelectedLanguage] = useState<string>('en');
   const [lastSessionReport, setLastSessionReport] = useState<SessionReport | null>(null);
   const [showDiagnostic, setShowDiagnostic] = useState(false);
+  const [initialMode, setInitialMode] = useState<LiveGameMode>('FREE_TALK');
+  const [selectedIcon, setSelectedIcon] = useState<IconItem | null>(null);
   const tapCountRef = useRef(0);
   const tapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -28,14 +30,15 @@ const App: React.FC = () => {
     setState(AppState.HUB);
   };
 
-  const handleSelectModule = () => {
+  const handleSelectModule = (mode: LiveGameMode) => {
+    setInitialMode(mode);
     setState(AppState.LIVE_SESSION);
   };
 
   const handleSessionFinish = (report: SessionReport) => {
-      setLastSessionReport(report);
-      MemorySystem.saveSessionReport(report);
-      setState(AppState.SESSION_SUMMARY);
+    setLastSessionReport(report);
+    MemorySystem.saveSessionReport(report);
+    setState(AppState.SESSION_SUMMARY);
   };
 
   const handleSessionExit = () => {
@@ -79,10 +82,11 @@ const App: React.FC = () => {
                )}
                
                {state === AppState.LIVE_SESSION && (
-                  <GroqSession
+                  <RealtimeSession
                       onFinish={handleSessionFinish}
                       onExit={handleSessionExit}
                       selectedLanguage={selectedLanguage}
+                      initialMode={initialMode}
                   />
                )}
                
