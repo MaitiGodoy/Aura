@@ -20,10 +20,10 @@ interface RealtimeSessionProps {
 
 type LoopState = 'listening' | 'thinking' | 'speaking' | 'error';
 
-// VAD — tuned for fast response
-const SILENCE_THRESHOLD = 0.06;
-const SILENCE_DURATION_MS = 600;
-const MIN_AUDIO_MS = 300;
+// VAD — tuned to NOT cut off mid-sentence
+const SILENCE_THRESHOLD = 0.12;
+const SILENCE_DURATION_MS = 2000;
+const MIN_AUDIO_MS = 800;
 
 const RealtimeSession: React.FC<RealtimeSessionProps> = ({ onExit, onFinish, selectedLanguage, character = 'aura' }) => {
   const [loopState, setLoopState] = useState<LoopState>('listening');
