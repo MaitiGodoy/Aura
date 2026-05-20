@@ -11,7 +11,9 @@ export const renderCardTool: FunctionDeclaration = {
       definition: { type: Type.STRING, description: 'The PORTUGUESE translation.' },
       phonetic: { type: Type.STRING, description: 'Brazilian phonetics. NO SYMBOLS like / or []. Just the raw sound.' },
       instruction: { type: Type.STRING, description: 'Actionable instruction.' },
-      cardType: { type: Type.STRING }
+      cardType: { type: Type.STRING, description: 'VOCAB | CORRECTION | EXPRESSION | CHALLENGE | CONTEXT | MEMORY_GAP | BRAINSCAPE' },
+      semanticColor: { type: Type.STRING, description: 'iCON mode color: blue=nova palavra, red=erro, green=como se diz, purple=expressão, orange=passado, yellow=futuro' },
+      hint: { type: Type.STRING, description: 'Descriptive hint for Dica button. Describe the term WITHOUT revealing the word itself.' }
     },
     required: ['term', 'definition', 'phonetic', 'instruction', 'cardType'],
   },
@@ -23,7 +25,7 @@ export const switchModeTool: FunctionDeclaration = {
   parameters: {
       type: Type.OBJECT,
       properties: {
-          mode: { type: Type.STRING, enum: ['FREE_TALK', 'VOCAB_BLITZ', 'GRAMMAR_GAUNTLET', 'RAPID_FIRE', 'DECODE', 'BRAINSCAPE'] }
+          mode: { type: Type.STRING, enum: ['FREE_TALK', 'VOCAB_FOCUS', 'GRAMMAR_PRACTICE', 'RAPID_DRILL', 'DECODE', 'BRAINSCAPE'] }
       },
       required: ['mode']
   }
@@ -80,24 +82,11 @@ export const recordGrammarGapTool: FunctionDeclaration = {
   }
 };
 
-export const requestAutonomousScoutTool: FunctionDeclaration = {
-  name: 'request_autonomous_scout',
-  description: 'Triggers the ScoutEngine to find real-world content for the next lesson.',
-  parameters: {
-    type: Type.OBJECT,
-    properties: {
-      topic: { type: Type.STRING, description: 'The topic to research (e.g., "The Expanse politics", "SPIN Selling").' }
-    },
-    required: ['topic']
-  }
-};
-
 export const AURA_TOOLS = [
   renderCardTool, 
   switchModeTool, 
   analyzePronunciationTool, 
   triggerHomeworkTool, 
   recordGrammarGapTool, 
-  switchDifficultyTool,
-  requestAutonomousScoutTool
+  switchDifficultyTool
 ];

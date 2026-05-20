@@ -1,7 +1,8 @@
 import { GoogleGenAI } from '@google/genai';
 import { MODEL_NAMES } from '../constants';
+import { ApiRouter } from './apiRouter';
+import { WebSpeechFallback } from './webSpeechFallback';
 import { base64ToUint8Array, decodePCM } from './audioUtils';
-import { ApiKeyManager } from './apiKeyManager';
 
 let sharedAudioCtx: AudioContext | null = null;
 
@@ -14,9 +15,15 @@ function getAudioContext(): AudioContext {
 
 export const TTSService = {
   speak: async (text: string) => {
+    // Try Web Speech fallback first if Google keys are exhausted
+    if (ApiRouter.isOnFallback && WebSpeechFallback.hasTTS) {
+      await WebSpeechFallback.speakAuraMessage(text);
+      return;
+    }
+
     try {
-      const apiKey = ApiKeyManager.getValidKey();
-      if (!apiKey) throw new Error("API Key missing");
+      const apiKey = ApiRouter.getGoogleKey();
+      if (!apiKey) throw new Error("No Google API keys available");
       const ai = new GoogleGenAI({ apiKey });
 
       const response = await ai.models.generateContent({
@@ -55,13 +62,17 @@ export const TTSService = {
         
         return new Promise((resolve) => {
           source.onended = () => {
-            // Do not close the shared context
             resolve(true);
           };
+          setTimeout(() => resolve(false), 10000);
         });
       }
     } catch (e) {
       console.error("TTS Error:", e);
+      // Fall back to Web Speech on failure
+      if (WebSpeechFallback.hasTTS) {
+        await WebSpeechFallback.speakAuraMessage(text);
+      }
     }
   }
 };

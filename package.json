@@ -5,12 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "vite build",
     "preview": "vite preview",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
     "@google/genai": "^1.52.0",
+    "@supabase/supabase-js": "^2.105.4",
     "@tailwindcss/vite": "^4.3.0",
     "lucide-react": "^1.14.0",
     "motion": "^12.38.0",

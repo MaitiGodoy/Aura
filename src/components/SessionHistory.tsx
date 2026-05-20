@@ -12,7 +12,7 @@ const SessionHistory: React.FC<Props> = ({ onClose }) => {
     const savedHistory = localStorage.getItem('session_history');
     if (savedHistory) {
       try {
-        setHistory(JSON.parse(savedHistory).reverse()); // Show newest first
+        setHistory(JSON.parse(savedHistory).reverse());
       } catch (e) {
         console.error("Failed to parse history", e);
       }
@@ -20,13 +20,12 @@ const SessionHistory: React.FC<Props> = ({ onClose }) => {
   }, []);
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-xl flex flex-col items-center justify-center p-6 animate-in fade-in duration-300">
-      <div className="w-full max-w-2xl flex flex-col h-[80vh] border border-white/10 rounded-xl bg-neutral-900/50 shadow-2xl overflow-hidden">
+    <div className="fixed inset-0 z-50 bg-transparent flex flex-col items-center justify-center p-6 animate-in fade-in duration-300">
+      <div className="w-full max-w-2xl flex flex-col h-[80vh] border rounded-xl bg-black/50 shadow-2xl overflow-hidden" style={{borderColor: '#00FFFF33', borderWidth: '1px'}}>
         
-        {/* Header */}
-        <div className="p-6 border-b border-white/10 flex justify-between items-center bg-black/40">
+        <div className="p-6 border-b flex justify-between items-center bg-black/40" style={{borderColor: '#00FFFF1A'}}>
           <h2 className="text-2xl font-display font-bold text-white tracking-wider flex items-center gap-2">
-            <span className="text-yellow-500">📜</span> SESSION LOGS
+            <span style={{color: '#00FFFF'}}>◇</span> SESSION LOGS
           </h2>
           <button 
             onClick={onClose}
@@ -36,24 +35,25 @@ const SessionHistory: React.FC<Props> = ({ onClose }) => {
           </button>
         </div>
 
-        {/* List */}
         <div className="flex-1 overflow-y-auto p-6 space-y-4">
           {history.length === 0 ? (
             <div className="text-center text-gray-500 font-mono py-12">
               NO DATA FOUND. START A SESSION TO GENERATE LOGS.
             </div>
           ) : (
-            history.map((session, index) => (
-              <div key={index} className="bg-white/5 border border-white/5 rounded-lg p-4 hover:border-yellow-500/30 transition-colors group">
+            history.map((session, index) => {
+              const accuracy = session.accuracyRate || 0;
+              return (
+              <div key={index} className="bg-white/5 border border-white/5 rounded-lg p-4 hover:border-blue-500/30 transition-colors group">
                 <div className="flex justify-between items-start mb-3">
                   <div className="flex items-center gap-3">
-                    <div className={`w-2 h-2 rounded-full ${session.flowRating === 'GODLIKE' ? 'bg-yellow-500 animate-pulse' : 'bg-blue-500'}`}></div>
+                    <div className={`w-2 h-2 rounded-full ${accuracy > 70 ? 'bg-blue-500' : 'bg-gray-500'}`}></div>
                     <span className="font-mono text-xs text-gray-400">
-                      {new Date().toLocaleDateString()} {/* In a real app, save timestamp in report */}
+                      {session.timestamp ? new Date(session.timestamp).toLocaleDateString() : 'Unknown date'}
                     </span>
                   </div>
-                  <div className="font-display font-bold text-yellow-500 text-xl">
-                    +{session.totalCoins} XP
+                  <div className="font-display font-bold text-blue-400 text-xl">
+                    {session.wordsPracticed || 0} words
                   </div>
                 </div>
 
@@ -67,14 +67,13 @@ const SessionHistory: React.FC<Props> = ({ onClose }) => {
                     <div className="font-mono font-bold text-white">{(session.cardsCollected || []).length}</div>
                   </div>
                   <div className="bg-black/30 p-2 rounded text-center">
-                    <div className="text-[10px] text-gray-500 uppercase tracking-wider">Rating</div>
-                    <div className={`font-mono font-bold ${session.flowRating === 'GODLIKE' ? 'text-yellow-400' : 'text-blue-400'}`}>
-                      {session.flowRating}
+                    <div className="text-[10px] text-gray-500 uppercase tracking-wider">Accuracy</div>
+                    <div className={`font-mono font-bold ${accuracy > 70 ? 'text-blue-400' : 'text-gray-400'}`}>
+                      {accuracy}%
                     </div>
                   </div>
                 </div>
 
-                {/* Mini Card Preview */}
                 {session.cardsCollected && session.cardsCollected.length > 0 && (
                   <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
                     {session.cardsCollected.map((card, i) => (
@@ -85,7 +84,7 @@ const SessionHistory: React.FC<Props> = ({ onClose }) => {
                   </div>
                 )}
               </div>
-            ))
+            )})
           )}
         </div>
       </div>

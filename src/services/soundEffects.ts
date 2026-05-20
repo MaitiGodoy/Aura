@@ -152,26 +152,24 @@ class SoundEffectsService {
     osc.stop(this.ctx.currentTime + 0.05);
   }
 
-  playJackpot() {
+  playFocus() {
     this.ensureContext();
     if (!this.ctx || !this.masterGain) return;
 
-    // Rapid arpeggio
-    for(let i=0; i<10; i++) {
-        const osc = this.ctx.createOscillator();
-        const gain = this.ctx.createGain();
-        osc.connect(gain);
-        gain.connect(this.masterGain);
-        
-        osc.type = 'square';
-        osc.frequency.setValueAtTime(400 + (i*100), this.ctx.currentTime + (i*0.05));
-        
-        gain.gain.setValueAtTime(0.1, this.ctx.currentTime + (i*0.05));
-        gain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + (i*0.05) + 0.1);
-        
-        osc.start(this.ctx.currentTime + (i*0.05));
-        osc.stop(this.ctx.currentTime + (i*0.05) + 0.1);
-    }
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(440, this.ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(660, this.ctx.currentTime + 0.15);
+    
+    gain.gain.setValueAtTime(0.15, this.ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 0.2);
+
+    osc.start();
+    osc.stop(this.ctx.currentTime + 0.2);
   }
 }
 

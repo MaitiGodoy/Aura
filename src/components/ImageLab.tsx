@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { GoogleGenAI } from '@google/genai';
 import { MODEL_NAMES } from '../constants';
+import { ApiRouter } from '../services/apiRouter';
 
 const ImageLab: React.FC = () => {
   const [prompt, setPrompt] = useState('');
@@ -11,7 +12,7 @@ const ImageLab: React.FC = () => {
     if (!prompt) return;
     setLoading(true);
     try {
-      const apiKey = process.env.GEMINI_API_KEY || (process.env as any).API_KEY;
+      const apiKey = ApiRouter.getGoogleKey();
       if (!apiKey) throw new Error("API Key missing");
       const ai = new GoogleGenAI({ apiKey });
 

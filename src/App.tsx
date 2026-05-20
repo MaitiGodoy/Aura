@@ -1,145 +1,133 @@
-
-import React, { useState, useEffect } from 'react';
-import ModeSelection from './components/ModeSelection';
+import React, { useState, useRef } from 'react';
+import ModuleHub from './components/ModuleHub';
 import LiveSession from './components/LiveSession';
-import ThinkingChat from './components/ThinkingChat';
 import ConceptCard from './components/ConceptCard';
 import LoginScreen from './components/LoginScreen';
 import SessionSummary from './components/SessionSummary';
 import SessionHistory from './components/SessionHistory';
-import NudgeManager from './components/NudgeManager';
+import AuraBackground from './components/AuraBackground';
+import DiagnosticPanel from './components/DiagnosticPanel';
 import { AppState, ConceptCardData, UserProfile, SessionReport, LiveGameMode } from './types';
 import { MemorySystem } from './services/memorySystem';
 
 const App: React.FC = () => {
-  // Start flow at LOGIN
-  const [state, setState] = useState<AppState>(AppState.LOGIN);
+  const [state, setState] = useState<AppState>(AppState.IDLE);
   const [selectedLanguage, setSelectedLanguage] = useState<string>('en');
   const [currentCard, setCurrentCard] = useState<ConceptCardData | null>(null);
   const [cardVisible, setCardVisible] = useState(false);
   const [lastSessionReport, setLastSessionReport] = useState<SessionReport | null>(null);
-  const [isCarMode, setIsCarMode] = useState(false);
-  const [isWokeUpMode, setIsWokeUpMode] = useState(false);
+  const [isHandsFree, setIsHandsFree] = useState(false);
   const [initialMode, setInitialMode] = useState<LiveGameMode>('FREE_TALK');
   const [lastCardResult, setLastCardResult] = useState<{ correct: boolean; timestamp: number } | null>(null);
+  const [showDiagnostic, setShowDiagnostic] = useState(false);
+  const tapCountRef = useRef(0);
+  const tapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
-      // Para fins de teste (forçar a tela de login inicial sempre aparecer):
-      // Comentado o auto-login que pulava a tela caso já houvesse cache na máquina.
-      /*
-      const savedUser = MemorySystem.getActiveUser();
-      if (savedUser) {
-          setState(AppState.MODE_SELECTION);
-      }
-      */
-  }, []);
+  const handleTapDiagnostic = () => {
+    tapCountRef.current++;
+    if (tapTimerRef.current) clearTimeout(tapTimerRef.current);
+    tapTimerRef.current = setTimeout(() => { tapCountRef.current = 0; }, 2000);
+    if (tapCountRef.current >= 5) { tapCountRef.current = 0; setShowDiagnostic(true); }
+  };
 
   const triggerCard = (card: ConceptCardData) => {
     setCardVisible(false);
-    setTimeout(() => {
-        setCurrentCard(card);
-        setCardVisible(true);
-    }, 100);
+    setCurrentCard(card);
+    setCardVisible(true);
   };
 
-  const handleLoginSuccess = (user: UserProfile) => {
-    // After login, go directly to mode selection (Language is now inside Mode Selection)
-    setState(AppState.MODE_SELECTION);
+  const handleLogin = (user: UserProfile, handsFree: boolean) => {
+    setIsHandsFree(handsFree);
+    setState(AppState.HUB);
   };
 
-  const handleModeStart = (carMode: boolean, wokeUpMode: boolean, mode: LiveGameMode) => {
-    setIsCarMode(carMode);
-    setIsWokeUpMode(wokeUpMode);
+  const handleSelectModule = (mode: LiveGameMode) => {
     setInitialMode(mode);
     setState(AppState.LIVE_SESSION);
   };
 
   const handleSessionFinish = (report: SessionReport) => {
       setLastSessionReport(report);
-      
-      const existingHistory = localStorage.getItem('session_history');
-      const history = existingHistory ? JSON.parse(existingHistory) : [];
-      history.push(report);
-      localStorage.setItem('session_history', JSON.stringify(history));
-
+      MemorySystem.saveSessionReport(report);
       setState(AppState.SESSION_SUMMARY);
   };
 
+  const handleSessionExit = () => {
+    setState(AppState.HUB);
+  };
+
+  const handleLogout = () => {
+    setState(AppState.IDLE);
+  };
+
+  const handleLanguageChange = (lang: string) => {
+    setSelectedLanguage(lang);
+  };
+
   return (
-    <div className="h-full w-full flex flex-col relative bg-black font-tech overflow-hidden text-white">
-      <NudgeManager />
-      <main className="flex-1 relative h-full w-full">
-         
-         {state === AppState.LOGIN && (
-            <LoginScreen onLoginSuccess={handleLoginSuccess} />
-         )}
-
-         {state === AppState.MODE_SELECTION && (
-             <ModeSelection 
-                onStart={handleModeStart}
-                onHistoryClick={() => setState(AppState.SESSION_HISTORY)}
-                selectedLanguage={selectedLanguage}
-                onLanguageChange={setSelectedLanguage}
-             />
-         )}
-
-         {state === AppState.IDLE && (
-            <div className="h-full w-full flex items-center justify-center">
-              <button 
-                  onClick={() => setState(AppState.MODE_SELECTION)}
-                  className="bg-yellow-500 text-black px-6 py-3 rounded font-bold"
-              >
-                RETURN TO LOBBY
-              </button>
-            </div>
-         )}
-         
-         {state === AppState.LIVE_SESSION && (
-            <LiveSession 
-                onCardTrigger={triggerCard} 
-                onFinish={handleSessionFinish} 
-                isCardVisible={cardVisible}
-                initialCarMode={isCarMode}
-                isWokeUpMode={isWokeUpMode}
-                initialMode={initialMode}
-                lastCardResult={lastCardResult}
-                selectedLanguage={selectedLanguage}
+    <div className="glass-wrapper h-full w-full flex flex-col relative font-tech overflow-hidden text-white">
+        <AuraBackground />
+        <div className="h-full w-full z-10 flex items-center justify-center sm:p-4">
+          <div className="w-full h-full sm:max-w-[400px] sm:max-h-[850px] relative bg-transparent overflow-hidden sm:shadow-[0_0_50px_rgba(0,255,255,0.1)] sm:rounded-3xl sm:border border-white/10">
+            {/* Hidden tap target for diagnostic (5 taps) */}
+            <div
+              onClick={handleTapDiagnostic}
+              className="absolute top-0 left-1/2 -translate-x-1/2 w-24 h-12 z-[150] cursor-pointer opacity-0"
             />
-         )}
-         
-         {state === AppState.TEXT_CHAT && (
-             <ThinkingChat onCardTrigger={triggerCard} selectedLanguage={selectedLanguage} />
-         )}
 
-         {state === AppState.SESSION_SUMMARY && lastSessionReport && (
-            <SessionSummary report={lastSessionReport} onClose={() => setState(AppState.MODE_SELECTION)} />
-         )}
+            {showDiagnostic && <DiagnosticPanel onClose={() => setShowDiagnostic(false)} />}
 
-         {state === AppState.SESSION_HISTORY && (
-            <SessionHistory onClose={() => setState(AppState.MODE_SELECTION)} />
-         )}
-      </main>
+            <main className="flex-1 relative h-full w-full">
+               {state === AppState.IDLE && (
+                  <LoginScreen
+                      onLogin={handleLogin}
+                  />
+               )}
 
-      <ConceptCard 
-        data={currentCard} 
-        isVisible={cardVisible} 
-        onClose={() => setCardVisible(false)} 
-        onResult={(correct) => setLastCardResult({ correct, timestamp: Date.now() })}
-        onRequestHint={() => {
-            console.log("Hint requested for:", currentCard?.term);
-        }}
-      />
+               {state === AppState.HUB && (
+                  <ModuleHub
+                      selectedLanguage={selectedLanguage}
+                      onLanguageChange={handleLanguageChange}
+                      onSelectModule={handleSelectModule}
+                      onLogout={handleLogout}
+                  />
+               )}
+               
+               {state === AppState.LIVE_SESSION && (
+                  <LiveSession
+                      onCardTrigger={triggerCard}
+                      onFinish={handleSessionFinish}
+                      onExit={handleSessionExit}
+                      isCardVisible={cardVisible}
+                      isHandsFree={isHandsFree}
+                      initialMode={initialMode}
+                      lastCardResult={lastCardResult}
+                      selectedLanguage={selectedLanguage}
+                  />
+               )}
+               
+               {state === AppState.SESSION_SUMMARY && lastSessionReport && (
+                  <SessionSummary report={lastSessionReport} onClose={handleSessionExit} />
+               )}
 
-      {state !== AppState.LOGIN && state !== AppState.LANGUAGE_SELECTION && state !== AppState.IDLE && state !== AppState.SESSION_SUMMARY && state !== AppState.SESSION_HISTORY && state !== AppState.MODE_SELECTION && (
-          <div className="absolute top-4 right-4 z-50">
-            <button 
-                onClick={() => setState(AppState.MODE_SELECTION)}
-                className="bg-black/50 backdrop-blur text-red-500 border border-red-900/50 px-4 py-2 text-xs font-bold rounded hover:bg-red-900/50 hover:text-white transition-colors"
-            >
-                EXIT
-            </button>
+               {state === AppState.SESSION_HISTORY && (
+                  <SessionHistory onClose={handleSessionExit} />
+               )}
+            </main>
+
+            <ConceptCard
+              data={currentCard}
+              isVisible={cardVisible}
+              onClose={() => setCardVisible(false)}
+              onResult={(correct) => setLastCardResult({ correct, timestamp: Date.now() })}
+              onRequestHint={() => {
+                  console.log("Hint requested for:", currentCard?.term);
+              }}
+              selectedLanguage={selectedLanguage}
+            />
+
           </div>
-      )}
+        </div>
     </div>
   );
 };
