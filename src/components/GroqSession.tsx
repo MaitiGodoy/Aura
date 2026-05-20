@@ -15,17 +15,16 @@ interface GroqSessionProps {
   selectedLanguage: string;
 }
 
-type SessionState = 'idle' | 'recording' | 'processing' | 'playing' | 'checking';
+type SessionState = 'idle' | 'recording' | 'processing' | 'playing';
 
 const GroqSession: React.FC<GroqSessionProps> = ({ onExit, onFinish, selectedLanguage }) => {
-  const [sessionState, setSessionState] = useState<SessionState>('checking');
+  const [sessionState, setSessionState] = useState<SessionState>('idle');
   const [caption, setCaption] = useState('');
   const [auraResponse, setAuraResponse] = useState('');
   const [sessionDuration, setSessionDuration] = useState(0);
   const [wordsPracticed, setWordsPracticed] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [isMuted, setIsMuted] = useState(false);
-  const [serverOnline, setServerOnline] = useState(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -35,7 +34,7 @@ const GroqSession: React.FC<GroqSessionProps> = ({ onExit, onFinish, selectedLan
   const isMountedRef = useRef(true);
   const historyRef = useRef<Array<{ role: string; content: string }>>([]);
   const startTimeRef = useRef(Date.now());
-  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
+  const captionIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Amplitude monitoring
   const [currentAmplitude, setCurrentAmplitude] = useState(0);
@@ -44,22 +43,6 @@ const GroqSession: React.FC<GroqSessionProps> = ({ onExit, onFinish, selectedLan
   useEffect(() => {
     isMountedRef.current = true;
     startTimeRef.current = Date.now();
-
-    // Check if API server is online
-    const checkServer = async () => {
-      try {
-        const res = await fetch('http://localhost:8080/health');
-        if (res.ok) {
-          setServerOnline(true);
-          setSessionState('idle');
-        } else {
-          setError('API server is not responding.');
-        }
-      } catch {
-        setError('Cannot connect to API server. Make sure it is running on port 8080.');
-      }
-    };
-    checkServer();
 
     const timer = setInterval(() => {
       if (isMountedRef.current) {
@@ -70,6 +53,7 @@ const GroqSession: React.FC<GroqSessionProps> = ({ onExit, onFinish, selectedLan
     return () => {
       isMountedRef.current = false;
       clearInterval(timer);
+      if (captionIntervalRef.current) clearInterval(captionIntervalRef.current);
       cleanup();
     };
   }, []);
@@ -86,15 +70,12 @@ const GroqSession: React.FC<GroqSessionProps> = ({ onExit, onFinish, selectedLan
       audioContextRef.current.close();
       audioContextRef.current = null;
     }
-    if (audioPlayerRef.current) {
-      audioPlayerRef.current.pause();
-      audioPlayerRef.current = null;
-    }
   }, []);
 
   const startRecording = useCallback(async () => {
     setError(null);
     setAuraResponse('');
+    setCaption('');
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -124,7 +105,7 @@ const GroqSession: React.FC<GroqSessionProps> = ({ onExit, onFinish, selectedLan
         const avg = dataArray.reduce((a, b) => a + b) / dataArray.length;
         const normalized = Math.min(avg / 128, 1);
         setCurrentAmplitude(normalized);
-        setIsUserSpeaking(normalized > 0.2);
+        setIsUserSpeaking(normalized > 0.15);
         Amplitude.setMic(normalized / 2);
         requestAnimationFrame(checkAmplitude);
       };
@@ -158,25 +139,63 @@ const GroqSession: React.FC<GroqSessionProps> = ({ onExit, onFinish, selectedLan
         SoundService.playClick();
 
         try {
-          const result: ConverseResponse = await GroqPipeline.converseAndPlay(
+          const result: ConverseResponse = await GroqPipeline.converse(
             audioBlob,
             historyRef.current,
-            (transcript) => {
-              if (isMountedRef.current) {
-                setCaption(transcript);
-                historyRef.current.push({ role: 'user', content: transcript });
-              }
-            },
-            (response) => {
-              if (isMountedRef.current) {
-                setAuraResponse(response);
-                historyRef.current.push({ role: 'assistant', content: response });
-                setWordsPracticed(prev => prev + 1);
-              }
-            },
           );
 
-          if (isMountedRef.current) {
+          if (!isMountedRef.current) return;
+
+          // Show transcription
+          setCaption(result.transcricao_aluno);
+          historyRef.current.push({ role: 'user', content: result.transcricao_aluno });
+
+          // Show response
+          setAuraResponse(result.resposta_texto_aura);
+          historyRef.current.push({ role: 'assistant', content: result.resposta_texto_aura });
+          setWordsPracticed(prev => prev + 1);
+
+          // Play audio and sync captions word-by-word
+          if (result.audio_url_ou_base64) {
+            setSessionState('playing');
+            const audio = new Audio(`data:audio/mp3;base64,${result.audio_url_ou_base64}`);
+            
+            // Estimate word timing based on audio duration
+            audio.addEventListener('loadedmetadata', () => {
+              const duration = audio.duration;
+              const words = result.resposta_texto_aura.split(/\s+/);
+              const msPerWord = (duration * 1000) / words.length;
+              
+              let wordIndex = 0;
+              let displayedCaption = '';
+              
+              captionIntervalRef.current = setInterval(() => {
+                if (wordIndex < words.length && isMountedRef.current) {
+                  displayedCaption += (wordIndex > 0 ? ' ' : '') + words[wordIndex];
+                  setCaption(displayedCaption);
+                  wordIndex++;
+                } else if (captionIntervalRef.current) {
+                  clearInterval(captionIntervalRef.current);
+                }
+              }, msPerWord);
+            });
+
+            audio.onended = () => {
+              if (isMountedRef.current) {
+                setSessionState('idle');
+                if (captionIntervalRef.current) clearInterval(captionIntervalRef.current);
+              }
+            };
+
+            audio.onerror = () => {
+              if (isMountedRef.current) {
+                setSessionState('idle');
+                if (captionIntervalRef.current) clearInterval(captionIntervalRef.current);
+              }
+            };
+
+            await audio.play();
+          } else {
             setSessionState('idle');
           }
         } catch (err: any) {
@@ -226,6 +245,7 @@ const GroqSession: React.FC<GroqSessionProps> = ({ onExit, onFinish, selectedLan
     });
   }, [sessionDuration, wordsPracticed, onFinish, cleanup]);
 
+  // Orb state mapping
   const getOrbState = (): 'idle' | 'listening' | 'speaking' => {
     if (sessionState === 'recording') return 'listening';
     if (sessionState === 'playing') return 'speaking';
@@ -283,7 +303,7 @@ const GroqSession: React.FC<GroqSessionProps> = ({ onExit, onFinish, selectedLan
         </div>
       )}
 
-      {/* Aura response */}
+      {/* Aura response text */}
       {auraResponse && sessionState !== 'recording' && (
         <div className="absolute z-40 flex justify-center px-4 pointer-events-none"
           style={{ bottom: '80px', left: '50%', transform: 'translateX(-50%)', width: 'calc(100% - 32px)' }}>
@@ -304,15 +324,6 @@ const GroqSession: React.FC<GroqSessionProps> = ({ onExit, onFinish, selectedLan
 
       {/* Recording button */}
       <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-3">
-        {sessionState === 'checking' && (
-          <>
-            <div className="w-20 h-20 rounded-full bg-gray-800 flex items-center justify-center border border-gray-700">
-              <div className="w-8 h-8 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
-            </div>
-            <span className="text-[10px] font-mono text-cyan-400 uppercase tracking-widest">Connecting...</span>
-          </>
-        )}
-
         {sessionState === 'idle' && (
           <>
             <button
