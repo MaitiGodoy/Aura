@@ -2,6 +2,9 @@
 
 export type KeyStatus = 'active' | 'rate_limited' | 'quota_exhausted';
 
+// Vite env vars are accessed via import.meta.env
+const viteEnv = import.meta.env as Record<string, string | undefined>;
+
 class ApiRouterService {
   googleKeys: string[] = [];
   private currentGoogleIndex = 0;
@@ -11,23 +14,28 @@ class ApiRouterService {
   private groqModel = 'llama-3.3-70b-versatile';
 
   constructor() {
-    // Load 5 Google keys from process.env
+    // Load Google keys from Vite env (supports multiple naming conventions)
     this.googleKeys = [
-      process.env.GOOGLE_API_KEY_1 || '',
-      process.env.GOOGLE_API_KEY_2 || '',
-      process.env.GOOGLE_API_KEY_3 || '',
-      process.env.GOOGLE_API_KEY_4 || '',
-      process.env.GOOGLE_API_KEY_5 || '',
+      viteEnv.VITE_GOOGLE_KEY_1 || '',
+      viteEnv.VITE_GOOGLE_KEY_2 || '',
+      viteEnv.VITE_GOOGLE_KEY_3 || '',
+      viteEnv.VITE_GOOGLE_KEY_4 || '',
+      viteEnv.VITE_GOOGLE_KEY_5 || '',
     ].filter(k => k.length > 0);
 
-    // Fallback to single GEMINI_API_KEY if rotation array not configured
+    // Fallback: single active key (common naming patterns)
     if (this.googleKeys.length === 0) {
-      const singleKey = process.env.GEMINI_API_KEY || process.env.API_KEY || '';
+      const singleKey = viteEnv.VITE_GEMINI_API_KEY
+        || viteEnv.VITE_API_KEY
+        || viteEnv.VITE_GOOGLE_ACTIVE_API_KEY
+        || viteEnv.GOOGLE_ACTIVE_API_KEY
+        || viteEnv.GEMINI_API_KEY
+        || '';
       if (singleKey) this.googleKeys = [singleKey];
     }
 
     this.keyStatuses = this.googleKeys.map(() => 'active');
-    this.groqKey = process.env.GROQ_API_KEY || '';
+    this.groqKey = viteEnv.VITE_GROQ_API_KEY || viteEnv.GROQ_API_KEY || '';
   }
 
   /** Get current active Google API key. Skips exhausted keys on each call. */

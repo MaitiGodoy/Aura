@@ -40,6 +40,15 @@ const ModuleHub: React.FC<Props> = ({ selectedLanguage, onLanguageChange, onSele
       color: '#00FFFF',
       icon: '◇',
     },
+    {
+      id: 'GROQ',
+      title: 'GROQ',
+      subtitle: 'Low Latency Engine',
+      description: 'Whisper STT + Llama LLM + Edge-TTS.',
+      mode: 'GROQ_PIPELINE' as LiveGameMode,
+      color: '#22c55e',
+      icon: '⚡',
+    },
   ];
 
   return (

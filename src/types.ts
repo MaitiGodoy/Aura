@@ -34,7 +34,7 @@ export enum AppState {
   SESSION_HISTORY = 'SESSION_HISTORY'
 }
 
-export type LiveGameMode = 'FREE_TALK' | 'VOCAB_FOCUS' | 'GRAMMAR_PRACTICE' | 'RAPID_DRILL' | 'DECODE' | 'ICON_MODE' | 'BRAINSCAPE';
+export type LiveGameMode = 'FREE_TALK' | 'VOCAB_FOCUS' | 'GRAMMAR_PRACTICE' | 'RAPID_DRILL' | 'DECODE' | 'ICON_MODE' | 'BRAINSCAPE' | 'GROQ_PIPELINE';
 
 export interface AuthState {
   isAuthenticated: boolean;

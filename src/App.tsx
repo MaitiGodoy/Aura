@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import ModuleHub from './components/ModuleHub';
 import LiveSession from './components/LiveSession';
+import GroqSession from './components/GroqSession';
 import ConceptCard from './components/ConceptCard';
 import LoginScreen from './components/LoginScreen';
 import SessionSummary from './components/SessionSummary';
@@ -17,7 +18,7 @@ const App: React.FC = () => {
   const [cardVisible, setCardVisible] = useState(false);
   const [lastSessionReport, setLastSessionReport] = useState<SessionReport | null>(null);
   const [isHandsFree, setIsHandsFree] = useState(false);
-  const [initialMode, setInitialMode] = useState<LiveGameMode>('FREE_TALK');
+  const [initialMode, setInitialMode] = useState<LiveGameMode>('GROQ_PIPELINE');
   const [lastCardResult, setLastCardResult] = useState<{ correct: boolean; timestamp: number } | null>(null);
   const [showDiagnostic, setShowDiagnostic] = useState(false);
   const tapCountRef = useRef(0);
@@ -64,6 +65,8 @@ const App: React.FC = () => {
     setSelectedLanguage(lang);
   };
 
+  const isGroqPipeline = initialMode === 'GROQ_PIPELINE';
+
   return (
     <div className="glass-wrapper h-full w-full flex flex-col relative font-tech overflow-hidden text-white">
         <AuraBackground />
@@ -93,7 +96,15 @@ const App: React.FC = () => {
                   />
                )}
                
-               {state === AppState.LIVE_SESSION && (
+               {state === AppState.LIVE_SESSION && isGroqPipeline && (
+                  <GroqSession
+                      onFinish={handleSessionFinish}
+                      onExit={handleSessionExit}
+                      selectedLanguage={selectedLanguage}
+                  />
+               )}
+
+               {state === AppState.LIVE_SESSION && !isGroqPipeline && (
                   <LiveSession
                       onCardTrigger={triggerCard}
                       onFinish={handleSessionFinish}
@@ -115,16 +126,18 @@ const App: React.FC = () => {
                )}
             </main>
 
-            <ConceptCard
-              data={currentCard}
-              isVisible={cardVisible}
-              onClose={() => setCardVisible(false)}
-              onResult={(correct) => setLastCardResult({ correct, timestamp: Date.now() })}
-              onRequestHint={() => {
-                  console.log("Hint requested for:", currentCard?.term);
-              }}
-              selectedLanguage={selectedLanguage}
-            />
+            {!isGroqPipeline && (
+              <ConceptCard
+                data={currentCard}
+                isVisible={cardVisible}
+                onClose={() => setCardVisible(false)}
+                onResult={(correct) => setLastCardResult({ correct, timestamp: Date.now() })}
+                onRequestHint={() => {
+                    console.log("Hint requested for:", currentCard?.term);
+                }}
+                selectedLanguage={selectedLanguage}
+              />
+            )}
 
           </div>
         </div>

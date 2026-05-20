@@ -40,31 +40,26 @@ const GeometricOrb: React.FC<Props> = ({ state = 'idle', amplitude = 0, classNam
       const cx = w / 2;
       const cy = h / 2;
 
-      // Clear with transparency to allow the background to be visible
       ctx.clearRect(0, 0, w, h);
 
       const time = Date.now() / 1000;
-      const baseRadius = 94; // slightly larger than avatar 90px radius
+      const baseRadius = 94;
 
-      let primaryColor = 'rgba(34, 197, 94, 0.9)'; // green
-      let secondaryColor = 'rgba(16, 185, 129, 0.6)'; // emerald
-      let shadowColor = '#22c55e';
+      let primaryColor = 'rgba(255, 255, 255, 0.5)';
+      let secondaryColor = 'rgba(255, 255, 255, 0.2)';
+      let shadowColor = '#ffffff';
 
       if (state === 'speaking') {
-        primaryColor = 'rgba(34, 197, 94, 0.9)'; // green
-        secondaryColor = 'rgba(16, 185, 129, 0.6)'; // emerald
+        primaryColor = 'rgba(34, 197, 94, 0.9)';
+        secondaryColor = 'rgba(16, 185, 129, 0.6)';
         shadowColor = '#22c55e';
       } else if (state === 'listening') {
-        primaryColor = 'rgba(250, 204, 21, 0.9)'; // yellow
-        secondaryColor = 'rgba(245, 158, 11, 0.6)'; // amber
+        primaryColor = 'rgba(250, 204, 21, 0.9)';
+        secondaryColor = 'rgba(245, 158, 11, 0.6)';
         shadowColor = '#facc15';
-      } else if (state === 'idle') {
-        primaryColor = 'rgba(255, 255, 255, 0.5)'; // white
-        secondaryColor = 'rgba(255, 255, 255, 0.2)';
-        shadowColor = '#ffffff';
       }
 
-      // Draw two layered glowing waveforms
+      // Draw smoke rings
       for (let layer = 0; layer < 2; layer++) {
         ctx.save();
         ctx.beginPath();
@@ -75,11 +70,10 @@ const GeometricOrb: React.FC<Props> = ({ state = 'idle', amplitude = 0, classNam
           ? 18 * amplitude 
           : state === 'listening' 
           ? 8 * amplitude 
-          : 3; // small heartbeat when idle
+          : 3;
         
         ctx.lineWidth = layer === 0 ? 3.5 : 2;
         ctx.strokeStyle = layer === 0 ? primaryColor : secondaryColor;
-        
         ctx.shadowBlur = state === 'idle' ? 5 : 20;
         ctx.shadowColor = shadowColor;
 
@@ -116,46 +110,35 @@ const GeometricOrb: React.FC<Props> = ({ state = 'idle', amplitude = 0, classNam
     };
   }, [state, amplitude]);
 
-  // Determine avatar src based on states to display correct version
-  const avatarSrc = state === 'listening' 
-    ? '/aura_aparencia_nova2.png' 
-    : state === 'speaking' 
-    ? '/aura_aparencia_nova3.png' 
-    : '/aura_aparencia_nova.png';
-
   return (
     <div className={`absolute inset-0 w-full h-full pointer-events-none z-10 ${className}`}>
-      {/* Canvas for the glowing waveforms */}
       <canvas
         ref={canvasRef}
         className="absolute inset-0 w-full h-full pointer-events-none z-0"
       />
       
-      {/* Centered Avatar Image */}
+      {/* Clean center circle - no photo */}
       <div 
-        className="absolute pointer-events-auto rounded-full overflow-hidden border border-white/20 transition-all duration-300 z-10 flex items-center justify-center"
+        className="absolute pointer-events-none rounded-full z-10 flex items-center justify-center"
         style={{
           top: '50%',
           left: '50%',
           transform: `translate(-50%, -50%) scale(${1 + (state === 'speaking' ? amplitude * 0.15 : state === 'listening' ? amplitude * 0.05 : 0)})`,
           width: '180px',
           height: '180px',
-          boxShadow: state === 'listening' 
-            ? '0 0 35px rgba(250, 204, 21, 0.5), inset 0 0 15px rgba(250, 204, 21, 0.3)' 
+          borderRadius: '50%',
+          background: state === 'listening' 
+            ? 'radial-gradient(circle, rgba(250,204,21,0.12) 0%, transparent 70%)' 
             : state === 'speaking' 
-            ? `0 0 ${35 + amplitude * 35}px rgba(34, 197, 94, ${0.4 + amplitude * 0.4}), inset 0 0 15px rgba(34, 197, 94, 0.3)` 
-            : '0 0 25px rgba(255, 255, 255, 0.25), inset 0 0 10px rgba(255, 255, 255, 0.1)',
+            ? `radial-gradient(circle, rgba(34,197,94,${0.08 + amplitude * 0.12}) 0%, transparent 70%)` 
+            : 'radial-gradient(circle, rgba(255,255,255,0.06) 0%, transparent 70%)',
+          boxShadow: state === 'listening' 
+            ? '0 0 35px rgba(250, 204, 21, 0.15)' 
+            : state === 'speaking' 
+            ? `0 0 ${35 + amplitude * 35}px rgba(34, 197, 94, ${0.15 + amplitude * 0.25})` 
+            : '0 0 25px rgba(255, 255, 255, 0.08)',
         }}
-      >
-        <img 
-          src={avatarSrc} 
-          alt="Aura Face" 
-          className="w-full h-full object-cover select-none"
-          onError={(e) => {
-            e.currentTarget.src = '/aura_aparencia_nova.png';
-          }}
-        />
-      </div>
+      />
     </div>
   );
 };

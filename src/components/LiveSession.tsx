@@ -37,6 +37,7 @@ const LiveSession: React.FC<Props> = ({ onCardTrigger, onFinish, onExit, isCardV
   const [isMuted, setIsMuted] = useState(false);
   const [currentMode, setCurrentMode] = useState<LiveGameMode>(initialMode);
   const [retryCount, setRetryCount] = useState(0);
+  const maxRetriesRef = useRef(3);
   
   const [selectedIcon, setSelectedIcon] = useState<IconItem | null>(null);
   const [showCurriculum, setShowCurriculum] = useState(initialMode === 'ICON_MODE');
@@ -534,7 +535,9 @@ const LiveSession: React.FC<Props> = ({ onCardTrigger, onFinish, onExit, isCardV
                 setConnectionProgress('');
                 setStatusMessage(null);
                 setRetryCount(0);
+                maxRetriesRef.current = 3;
                 isConnectingRef.current = false;
+                startTimeRef.current = Date.now();
                 
                 const actualRate = inputCtx.sampleRate || 16000;
                 const processor = inputCtx.createScriptProcessor(512, 1, 1);
@@ -756,10 +759,19 @@ const LiveSession: React.FC<Props> = ({ onCardTrigger, onFinish, onExit, isCardV
             },
             onclose: () => { 
                 if (isMountedRef.current && connectionState !== 'ERROR' && !isFatalErrorRef.current) {
-                    console.log(`Connection closed, retrying in ${Math.min(1000 * Math.pow(2, retryCount), 10000)}ms...`);
+                    const retries = retryCount + 1;
+                    if (retries > maxRetriesRef.current) {
+                        console.error(`[LiveSession] Max retries (${maxRetriesRef.current}) reached. Showing error.`);
+                        setConnectionState('ERROR');
+                        setConnectionError('Connection lost after multiple attempts. Check your internet and try again.');
+                        isConnectingRef.current = false;
+                        isFatalErrorRef.current = true;
+                        return;
+                    }
+                    console.log(`[LiveSession] Connection closed, retry ${retries}/${maxRetriesRef.current}...`);
                     setConnectionState('RECONNECTING');
                     isConnectingRef.current = false;
-                    const delay = Math.min(1000 * Math.pow(2, retryCount), 10000);
+                    const delay = Math.min(1000 * Math.pow(2, retryCount), 5000);
                     setTimeout(() => isMountedRef.current && setRetryCount(c => c + 1), delay);
                 } 
             },
@@ -817,12 +829,15 @@ const LiveSession: React.FC<Props> = ({ onCardTrigger, onFinish, onExit, isCardV
     const recoveryTimer = setInterval(() => {
         if (isMountedRef.current && (connectionState === 'RECONNECTING' || connectionState === 'CONNECTING')) {
             const now = Date.now();
-            if (now - startTimeRef.current > 45000 && retryCount > 0) { 
-               console.warn("Forcing connection state reset due to hang");
+            if (now - startTimeRef.current > 30000) { 
+               console.warn("[LiveSession] Forcing error due to connection hang");
                setConnectionState('ERROR');
+               setConnectionError('Connection timed out. Please check your network.');
+               isConnectingRef.current = false;
+               isFatalErrorRef.current = true;
             }
         }
-    }, 5000);
+    }, 3000);
 
     return () => {
         clearInterval(recoveryTimer);
@@ -1045,23 +1060,32 @@ const LiveSession: React.FC<Props> = ({ onCardTrigger, onFinish, onExit, isCardV
           )}
         </div>
       )}
-      {connectionState === 'RECONNECTING' && <div className="z-50 text-cyan-400 animate-pulse font-mono bg-black/80 px-4 py-2 rounded uppercase tracking-widest">Reconnecting... ({retryCount})</div>}
+      {connectionState === 'RECONNECTING' && (
+        <div className="z-50 flex flex-col items-center gap-2">
+          <div className="text-cyan-400 animate-pulse font-mono bg-black/80 px-4 py-2 rounded uppercase tracking-widest">
+            Reconnecting... ({retryCount}/{maxRetriesRef.current})
+          </div>
+          <div className="w-6 h-6 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
+        </div>
+      )}
       {connectionState === 'ERROR' && (
           <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-md">
               <div className={`flex flex-col items-center gap-6 p-10 rounded-2xl border-2 shadow-2xl max-w-sm w-full mx-4 ${isIconMode ? 'bg-[#1a0b2e] border-purple-500' : 'bg-neutral-900 border-red-500'}`}>
                   <div className={`${isIconMode ? 'text-purple-400' : 'text-red-500'} font-black text-3xl uppercase tracking-tighter text-center leading-none`}>
-                    {connectionError && (connectionError.includes('quota') || connectionError.includes('429') || connectionError.toLowerCase().includes('spending cap')) ? 'LIMIT REACHED' : 'Connection Error'}
+                    {connectionError && (connectionError.includes('quota') || connectionError.includes('429') || connectionError.toLowerCase().includes('spending cap')) ? 'LIMIT REACHED' : 'Connection Lost'}
                   </div>
                   <p className="text-gray-400 text-sm italic text-center">
                     {connectionError && (connectionError.includes('quota') || connectionError.includes('429') || connectionError.toLowerCase().includes('spending cap')) 
                         ? 'You have exceeded your daily API quota or monthly spending limit. Please check your AI Studio billing configuration.' 
-                        : 'A connection error occurred.'}
+                        : connectionError || 'A connection error occurred. Check your internet and try again.'}
                   </p>
                   <button 
                     onClick={() => {
                         SoundService.playClick();
                         setConnectionState('CONNECTING');
                         setConnectionError(null);
+                        isFatalErrorRef.current = false;
+                        maxRetriesRef.current = 3;
                         setTimeout(() => setRetryCount(c => c + 1), 100);
                     }}
                     className="w-full bg-white text-black font-black px-8 py-4 rounded-xl hover:bg-opacity-90 transition-all shadow-lg active:scale-95 uppercase tracking-widest"
