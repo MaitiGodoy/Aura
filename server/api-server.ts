@@ -1,13 +1,14 @@
 /**
- * Aura API Server — Natural Brazilian Portuguese + English Pipeline
+ * Aura API Server — Natural Brazilian Portuguese + ElevenLabs TTS
  *
  * Characters:
- * - Aura: Female, Brazilian teacher who speaks Portuguese with English phrases
- * - iCON: Male, carioca (Rio) — gírias cariocas, sotaque carioca
- * - AMOS: Female, mineira (Minas) — expressões mineiras, sotaque mineiro
+ * - Aura: Female, Brazilian teacher — ElevenLabs "Rachel" voice
+ * - iCON: Male, carioca (Rio) — ElevenLabs "Antoni" voice
+ * - AMOS: Female, mineira (Minas) — ElevenLabs "Bella" voice
  *
- * All characters respond PRIMARILY in Portuguese with English phrases embedded.
- * This makes the Brazilian TTS voices sound natural.
+ * TTS: ElevenLabs eleven_multilingual_v2 — indistinguishable from human speech
+ * STT: Groq Whisper Turbo
+ * LLM: Groq Llama 3.1 8B Instant
  */
 
 import 'dotenv/config';
@@ -23,25 +24,30 @@ import { randomUUID } from 'crypto';
 
 const PORT = parseInt(process.env.PORT || '8080', 10);
 const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
+const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY || '';
 const GROQ_ENDPOINT = 'https://api.groq.com/openai/v1';
+const ELEVENLABS_ENDPOINT = 'https://api.elevenlabs.io/v1';
 
 const STT_MODEL = 'whisper-large-v3-turbo';
 const LLM_MODEL = 'llama-3.1-8b-instant';
+const TTS_MODEL = 'eleven_multilingual_v2';
 
 // ─── Character System ────────────────────────────────────────────────────────
 
 interface CharacterConfig {
-  voice: string;
-  rate: string;
-  pitch: string;
+  voiceId: string;
   systemPrompt: string;
+  voiceSettings: {
+    stability: number;
+    similarityBoost: number;
+    style: number;
+  };
 }
 
 const CHARACTERS: Record<string, CharacterConfig> = {
   aura: {
-    voice: 'pt-BR-FranciscaNeural',
-    rate: '+0%',
-    pitch: '+0Hz',
+    voiceId: '21m00Tcm4TlvDq8ikWAM',
+    voiceSettings: { stability: 0.5, similarityBoost: 0.8, style: 0.2 },
     systemPrompt: `Você é Aura, uma professora de inglês brasileira. Você fala PORTUGUÊS BRASILEIRO o tempo todo, com frases em inglês misturadas naturalmente.
 
 REGRA PRINCIPAL: SEMPRE responda em português brasileiro. Use inglês APENAS para ensinar palavras/frases específicas.
@@ -61,15 +67,14 @@ REGRAS:
 TOM: Direta, prática, calorosa. Como uma amiga que te ensina inglês.`,
   },
   icon: {
-    voice: 'pt-BR-AntonioNeural',
-    rate: '+5%',
-    pitch: '-3Hz',
+    voiceId: 'pNInz6ob7DYSrtmYbDnL',
+    voiceSettings: { stability: 0.4, similarityBoost: 0.85, style: 0.3 },
     systemPrompt: `Você é iCON, um professor de inglês CARIOCA do Rio de Janeiro. Você fala PORTUGUÊS BRASILEIRO com sotaque e gírias cariocas.
 
 REGRA PRINCIPAL: SEMPRE responda em português brasileiro com gírias cariocas. Use inglês APENAS para ensinar frases.
 
 GÍRIAS CARIOCAS QUE VOCÊ USA:
-- "cara", "tá ligado", "beleza", "mano", "suave", "de boa", "caraio", "pô", "e aí", "firmeza", "tá tranquilo"
+- "cara", "tá ligado", "beleza", "mano", "suave", "de boa", "pô", "e aí", "firmeza", "tá tranquilo"
 
 EXEMPLO DE COMO FALAR:
 - "E aí cara, beleza? Você falou 'I go store'. Tá ligado que falta o 'to the'? 'I go to the store'. Suave? Me diz aí, onde você vai sempre?"
@@ -86,9 +91,8 @@ REGRAS:
 TOM: Descontraído, carioca raiz, amigo que ensina. Usa "cara", "mano", "tá ligado" naturalmente.`,
   },
   amos: {
-    voice: 'pt-BR-LeticiaNeural',
-    rate: '-5%',
-    pitch: '+5Hz',
+    voiceId: 'EXAVITh4vr4yRbJXh',
+    voiceSettings: { stability: 0.55, similarityBoost: 0.75, style: 0.15 },
     systemPrompt: `Você é AMOS, uma professora de inglês MINEIRA de Minas Gerais. Você fala PORTUGUÊS BRASILEIRO com sotaque e expressões mineiras.
 
 REGRA PRINCIPAL: SEMPRE responda em português brasileiro com expressões mineiras. Use inglês APENAS para ensinar frases.
@@ -116,13 +120,19 @@ const DEFAULT_CHARACTER = 'aura';
 
 const STT_TIMEOUT_MS = 4000;
 const LLM_TIMEOUT_MS = 6000;
-const TTS_TIMEOUT_MS = 5000;
+const TTS_TIMEOUT_MS = 8000;
 
 const MAX_HISTORY = 4;
 const MAX_TOKENS = 80;
 
 if (!GROQ_API_KEY) {
   console.error('FATAL: GROQ_API_KEY environment variable is required');
+  process.exit(1);
+}
+
+if (!ELEVENLABS_API_KEY) {
+  console.error('FATAL: ELEVENLABS_API_KEY environment variable is required');
+  console.error('Get one at: https://elevenlabs.io/app/sign-up');
   process.exit(1);
 }
 
@@ -158,7 +168,7 @@ const upload = multer({
 app.use(express.json({ limit: '1mb' }));
 
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', uptime: process.uptime(), models: { stt: STT_MODEL, llm: LLM_MODEL }, characters: Object.keys(CHARACTERS) });
+  res.json({ status: 'ok', uptime: process.uptime(), models: { stt: STT_MODEL, llm: LLM_MODEL, tts: 'ElevenLabs ' + TTS_MODEL }, characters: Object.keys(CHARACTERS) });
 });
 
 // ─── Main Endpoint ───────────────────────────────────────────────────────────
@@ -321,34 +331,42 @@ async function generateAndSpeak(
   return { text, audioBase64 };
 }
 
-// ─── TTS: Edge-TTS ──────────────────────────────────────────────────────────
+// ─── TTS: ElevenLabs ────────────────────────────────────────────────────────
 
 async function textToSpeech(text: string, character: CharacterConfig): Promise<string> {
-  const filename = `tts_${randomUUID()}.mp3`;
-  const filepath = join(tmpdir(), filename);
+  const { default: fetch } = await import('node-fetch');
 
-  try {
-    const { EdgeTTS } = await import('node-edge-tts');
-    const tts = new EdgeTTS({
-      voice: character.voice,
-      rate: character.rate,
-      pitch: character.pitch,
-    });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), TTS_TIMEOUT_MS);
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), TTS_TIMEOUT_MS);
+  const response = await fetch(`${ELEVENLABS_ENDPOINT}/text-to-speech/${character.voiceId}`, {
+    method: 'POST',
+    headers: {
+      'xi-api-key': ELEVENLABS_API_KEY,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      text,
+      model_id: TTS_MODEL,
+      voice_settings: {
+        stability: character.voiceSettings.stability,
+        similarity_boost: character.voiceSettings.similarityBoost,
+        style: character.voiceSettings.style,
+        use_speaker_boost: true,
+      },
+    }),
+    signal: controller.signal,
+  });
 
-    await tts.ttsPromise(text, filepath);
-    clearTimeout(timeoutId);
+  clearTimeout(timeoutId);
 
-    const audioBuffer = await readFile(filepath);
-    return audioBuffer.toString('base64');
-  } catch (err: any) {
-    if (err.name === 'AbortError') throw new Error('TTS timeout');
-    throw err;
-  } finally {
-    try { await unlink(filepath); } catch { /* ignore */ }
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`ElevenLabs TTS ${response.status}: ${errorText}`);
   }
+
+  const audioBuffer = Buffer.from(await response.arrayBuffer());
+  return audioBuffer.toString('base64');
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -388,13 +406,13 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 
 httpServer.listen(PORT, () => {
   console.log(`\n╔══════════════════════════════════════════════════════════╗`);
-  console.log(`║  AURA API — Natural Brazilian Portuguese Pipeline       ║`);
+  console.log(`║  AURA API — ElevenLabs Natural Voices Pipeline          ║`);
   console.log(`║  POST /api/converse                                   ║`);
   console.log(`║  GET  /health                                         ║`);
   console.log(`║  Port: ${PORT}                                           ║`);
   console.log(`║  STT: ${STT_MODEL} (Turbo)                                ║`);
   console.log(`║  LLM: ${LLM_MODEL} (8B Instant)                           ║`);
-  console.log(`║  TTS: Edge-TTS (Brazilian voices)                       ║`);
+  console.log(`║  TTS: ElevenLabs ${TTS_MODEL}                           ║`);
   console.log(`║  Characters: ${Object.keys(CHARACTERS).join(', ')}                   ║`);
   console.log(`║  Max tokens: ${MAX_TOKENS} (short responses)                 ║`);
   console.log(`╚══════════════════════════════════════════════════════════╝\n`);
