@@ -1,4 +1,3 @@
-
 import React, { useEffect, useRef, useState } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
 import { AURA_SYSTEM_INSTRUCTION, MODEL_NAMES, AURA_WOKE_UP_SYSTEM_INSTRUCTION, AURA_ICON_SYSTEM_INSTRUCTION, AURA_AMOS_SYSTEM_INSTRUCTION, AURA_HANDS_FREE_SYSTEM_INSTRUCTION } from '../constants';
@@ -8,7 +7,6 @@ import { base64ToUint8Array, arrayBufferToBase64, decodePCM, float32ToPCM16 } fr
 import { MemorySystem } from '../services/memorySystem';
 import { ApiRouter } from '../services/apiRouter';
 import { WebSpeechFallback } from '../services/webSpeechFallback';
-import { GroqEngine, GroqToolCall } from '../services/groqConversation';
 import { ConceptCardData, SessionReport, LiveGameMode, PronunciationFeedback } from '../types';
 import { AURA_TOOLS } from '../services/toolDefinitions';
 import PronunciationWidget from './PronunciationWidget';
@@ -77,19 +75,14 @@ const LiveSession: React.FC<Props> = ({ onCardTrigger, onFinish, onExit, isCardV
   useEffect(() => {
     if (!lastCardResult) return;
 
-    if (isGroqModeRef.current) {
-        const msg = lastCardResult.correct
-            ? "[[SYSTEM: User correctly identified the card!]]"
-            : "[[SYSTEM: User FAILED the card. Correct and coach them.]]";
-        GroqEngine.injectSystemMessage(msg);
-    } else if (sessionRef.current) {
+    if (sessionRef.current) {
         sessionRef.current.then(s => {
             if (!s) return;
             const msg = lastCardResult.correct 
                 ? "[[SYSTEM: User correctly identified the card!]]" 
                 : "[[SYSTEM: User FAILED the card. Correct and coach them.]]";
             s.sendRealtimeInput([{ text: msg }]);
-        });
+        }).catch(console.error);
     }
     
     if (lastCardResult.correct) {
@@ -115,7 +108,6 @@ const LiveSession: React.FC<Props> = ({ onCardTrigger, onFinish, onExit, isCardV
   const analyserRef = useRef<AnalyserNode | null>(null);
   const outputAnalyserRef = useRef<AnalyserNode | null>(null);
   const isConnectingRef = useRef<boolean>(false);
-  const isGroqModeRef = useRef<boolean>(false);
   const captionTimeoutsRef = useRef<number[]>([]);
   const pendingWordsRef = useRef<string[]>([]);
   const flushTimeoutRef = useRef<any>(null);
@@ -230,10 +222,6 @@ const LiveSession: React.FC<Props> = ({ onCardTrigger, onFinish, onExit, isCardV
       clearCaptionTimeouts();
       clearFlushTimeout();
       pendingWordsRef.current = [];
-      if (isGroqModeRef.current) {
-          GroqEngine.stop();
-          isGroqModeRef.current = false;
-      }
       if (processorRef.current) { 
           try { processorRef.current.disconnect(); } catch(e) {}
           processorRef.current = null; 
@@ -268,100 +256,6 @@ const LiveSession: React.FC<Props> = ({ onCardTrigger, onFinish, onExit, isCardV
           } catch(e) {}
       }
     };
-    const executeGroqToolCall = (tool: GroqToolCall) => {
-      if (!isMountedRef.current) return;
-      switch (tool.name) {
-        case 'render_concept_card':
-          onCardTrigger({
-            term: tool.args.term,
-            definition: tool.args.definition,
-            phonetic: tool.args.phonetic,
-            context: tool.args.instruction,
-            type: (tool.args.cardType || 'VOCAB') as any,
-            semanticColor: tool.args.semanticColor as any,
-            hint: tool.args.hint,
-            exampleSentence: tool.args.exampleSentence,
-            exampleTranslation: tool.args.exampleTranslation,
-          });
-          sessionCardsRef.current.push({
-            term: tool.args.term,
-            definition: tool.args.definition,
-            phonetic: tool.args.phonetic,
-            context: tool.args.instruction,
-            type: (tool.args.cardType || 'VOCAB') as any,
-            semanticColor: tool.args.semanticColor as any,
-            hint: tool.args.hint,
-            exampleSentence: tool.args.exampleSentence,
-            exampleTranslation: tool.args.exampleTranslation,
-          });
-          break;
-        case 'switch_game_mode':
-          executeModeSwitch(tool.args.mode as LiveGameMode);
-          break;
-        case 'record_grammar_gap':
-          MemorySystem.recordGrammarGap(tool.args.gap);
-          setStatusMessage(`FOCUS: ${tool.args.gap}`);
-          setTimeout(() => isMountedRef.current && setStatusMessage(null), 3000);
-          break;
-        case 'trigger_homework':
-          setHomeworkExercise(tool.args.exercise);
-          setShowHomework(true);
-          setStatusMessage("HOMEWORK");
-          setTimeout(() => isMountedRef.current && setStatusMessage(null), 2000);
-          break;
-        case 'switch_difficulty':
-          MemorySystem.setDifficultyLevel(tool.args.level as any);
-          setStatusMessage(`LEVEL: ${tool.args.level}`);
-          setTimeout(() => isMountedRef.current && setStatusMessage(null), 3000);
-          break;
-        case 'analyze_pronunciation':
-          setPronunciationData({
-            targetWord: tool.args.targetWord,
-            userPhonetic: tool.args.userPhonetic,
-            accuracyScore: tool.args.accuracyScore,
-            feedback: tool.args.feedback,
-          });
-          break;
-      }
-    };
-
-    const startGroqSession = async (lang: string, mode: LiveGameMode, iconTitle?: string) => {
-      if (!isMountedRef.current || isGroqModeRef.current) return;
-      isGroqModeRef.current = true;
-
-      if (sessionRef.current) {
-        try { const s = await sessionRef.current; await s.close(); } catch (e) {}
-        sessionRef.current = null;
-      }
-
-      setConnectionState('CONNECTED');
-      setConnectionError(null);
-      setRetryCount(0);
-      isConnectingRef.current = false;
-
-      const groqMode = mode === 'FREE_TALK' ? (isHandsFree ? 'HANDS_FREE' : 'FREE_TALK') : mode;
-      await GroqEngine.start(lang, groqMode, {
-        onTranscript: (text) => {
-          captionRef.current = text;
-          setCaption(text);
-        },
-        onResponse: (text) => {
-          captionRef.current = text;
-          setCaption(text);
-          setWordsPracticed(prev => prev + 1);
-        },
-        onToolCall: (tool) => executeGroqToolCall(tool),
-        onError: (error) => {
-          console.error('[Groq] Error:', error);
-          if (isMountedRef.current) {
-            setConnectionError(error);
-            setConnectionState('ERROR');
-          }
-        },
-        onSpeakingChange: (speaking) => setIsUserSpeaking(speaking),
-      }, iconTitle);
-    };
-
     const startSession = async () => {
       if (isConnectingRef.current) return;
       isConnectingRef.current = true;
@@ -370,15 +264,6 @@ const LiveSession: React.FC<Props> = ({ onCardTrigger, onFinish, onExit, isCardV
       try {
         const apiKey = ApiRouter.getGoogleKey();
         if (!apiKey) {
-            // Full conversational fallback via Groq + WebSpeech
-            if (GroqEngine.isAvailable) {
-                console.warn("[LiveSession] No Google API keys. Using Groq conversation engine.");
-                isGroqModeRef.current = true;
-                await startGroqSession(selectedLanguage, currentMode, selectedIcon?.title || undefined);
-                isConnectingRef.current = false;
-                return;
-            }
-            // Basic audio-only fallback (no conversation, just coaching)
             if (WebSpeechFallback.isAvailable) {
                 console.warn("[LiveSession] No Google API keys. Using Web Speech fallback.");
                 setConnectionState('CONNECTED');
@@ -388,9 +273,9 @@ const LiveSession: React.FC<Props> = ({ onCardTrigger, onFinish, onExit, isCardV
                 setTimeout(() => isMountedRef.current && setStatusMessage(null), 3000);
                 return;
             }
-            console.error("No API keys or fallback available.");
+            console.error("No API keys available.");
             setConnectionState('ERROR');
-            setConnectionError("No API keys available. Add Google or Groq keys to environment.");
+            setConnectionError("No API keys available. Add Google API key to environment.");
             isConnectingRef.current = false;
             return;
         }
@@ -790,17 +675,8 @@ const LiveSession: React.FC<Props> = ({ onCardTrigger, onFinish, onExit, isCardV
                             return;
                         }
                         
-                        // ALL KEYS EXHAUSTED — try Groq
+                        // ALL KEYS EXHAUSTED
                         isFatalErrorRef.current = true;
-                        if (GroqEngine.isAvailable) {
-                            setStatusMessage("SWITCHING TO GROQ");
-                            isGroqModeRef.current = true;
-                            startGroqSession(selectedLanguage, currentMode, selectedIcon?.title || undefined);
-                            setConnectionState('CONNECTED');
-                            setConnectionError(null);
-                            setTimeout(() => isMountedRef.current && setStatusMessage(null), 2000);
-                            return;
-                        }
                     }
                     if (errorStr.includes('RATE_LIMIT') || errorStr.includes('rate')) {
                         ApiRouter.markCurrentKeyFailed('rate_limited');
@@ -851,12 +727,6 @@ const LiveSession: React.FC<Props> = ({ onCardTrigger, onFinish, onExit, isCardV
       Vibration.success();
       
       let aiBrief = "SESSION COMPLETE. GOOD WORK.";
-
-      // Stop Groq engine if active
-      if (isGroqModeRef.current) {
-        GroqEngine.stop();
-        isGroqModeRef.current = false;
-      }
 
       try {
         if (ApiRouter.hasGroq) {

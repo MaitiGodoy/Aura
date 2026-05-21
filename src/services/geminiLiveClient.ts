@@ -1,9 +1,8 @@
-/** GeminiLiveClient — Direct WebSocket client for Gemini Live API */
+/** GeminiLiveClient — Direct WebSocket client for Gemini Live API (continuous streaming) */
 
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
 const MODEL = 'gemini-2.5-flash-native-audio-latest';
 
-// Gemini Live API WebSocket endpoint
 const WS_URL = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${GEMINI_API_KEY}`;
 
 export type CharacterName = 'aura' | 'icon' | 'amos' | 'gaucho';
@@ -64,15 +63,15 @@ export class GeminiLiveClient {
     if (this.isConnecting || this.ws?.readyState === WebSocket.OPEN) return;
     this.isConnecting = true;
 
-    console.log('[GeminiLive] Connecting directly to:', WS_URL);
+    console.log('[GeminiLive] Connecting directly to Gemini Live API');
 
     this.ws = new WebSocket(WS_URL);
+    this.ws.binaryType = 'blob';
 
     this.ws.onopen = () => {
       console.log('[GeminiLive] Connected to Gemini');
       this.isConnecting = false;
 
-      // Send setup message
       const characterConfig = CHARACTERS[this.character];
       const setup = {
         setup: {
@@ -93,16 +92,30 @@ export class GeminiLiveClient {
         },
       };
 
-      console.log('[GeminiLive] Sending setup');
+      console.log('[GeminiLive] Sending setup with voice:', characterConfig.voiceName);
       this.ws!.send(JSON.stringify(setup));
     };
 
-    this.ws.onmessage = (event) => {
+    this.ws.onmessage = async (event) => {
+      // Handle binary audio data (Blob)
+      if (event.data instanceof Blob) {
+        const arrayBuffer = await event.data.arrayBuffer();
+        const bytes = new Uint8Array(arrayBuffer);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        const base64 = btoa(binary);
+        this.events.audio_chunk?.(base64);
+        return;
+      }
+
+      // Handle JSON messages
       try {
         const msg = JSON.parse(event.data);
 
         if (msg.setupComplete) {
-          console.log('[GeminiLive] Setup complete');
+          console.log('[GeminiLive] Setup complete — ready for audio');
           this.events.ready?.();
           return;
         }
@@ -116,6 +129,17 @@ export class GeminiLiveClient {
         if (msg.serverContent) {
           const content = msg.serverContent;
 
+          // Transcription from Gemini (user speech)
+          if (content.inputTranscription?.text) {
+            this.events.transcription?.(content.inputTranscription.text, 'user');
+          }
+
+          // Transcription from Gemini (model speech)
+          if (content.outputTranscription?.text) {
+            this.events.transcription?.(content.outputTranscription.text, 'model');
+          }
+
+          // Audio + text from model
           if (content.modelTurn?.parts?.length > 0) {
             if (!this.isGenerating) {
               this.isGenerating = true;
@@ -143,7 +167,7 @@ export class GeminiLiveClient {
           }
         }
       } catch (err) {
-        console.error('[GeminiLive] Parse error:', err);
+        console.error('[GeminiLive] Parse error:', err, 'data:', event.data);
       }
     };
 
@@ -162,6 +186,7 @@ export class GeminiLiveClient {
     };
   }
 
+  /** Send PCM audio chunk to Gemini — call continuously while mic is active */
   sendAudioChunk(pcmData: Int16Array) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
 
@@ -182,28 +207,10 @@ export class GeminiLiveClient {
     }));
   }
 
-  activityStart() {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-    this.ws.send(JSON.stringify({
-      client_content: {
-        turns: [{ role: 'user', parts: [] }],
-        turn_complete: false,
-      },
-    }));
-  }
-
-  activityEnd() {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-    this.ws.send(JSON.stringify({
-      client_content: {
-        turns: [{ role: 'user', parts: [] }],
-        turn_complete: true,
-      },
-    }));
-  }
-
+  /** Interrupt Gemini while it's speaking */
   interrupt() {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    console.log('[GeminiLive] Sending interrupt');
     this.ws.send(JSON.stringify({
       client_content: {
         turns: [{ role: 'user', parts: [] }],
