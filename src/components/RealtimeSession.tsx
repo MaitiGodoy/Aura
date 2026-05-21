@@ -1,12 +1,10 @@
-/** RealtimeSession — Conversação automática com VAD (detecção de silêncio) */
+/** RealtimeSession — Conversação em tempo real com Gemini Live API */
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { GroqPipeline, ConverseResponse, CharacterName, CHARACTERS, CharacterInfo } from '../services/groqPipeline';
-import { MemorySystem } from '../services/memorySystem';
+import { CharacterName, CHARACTERS } from '../services/groqPipeline';
+import { GeminiLiveClient } from '../services/geminiLiveClient';
 import { SoundService } from '../services/soundEffects';
-import { Vibration } from '../services/vibrationService';
 import { Amplitude } from '../services/amplitudeStore';
-import { getCurriculum, getAllIconItems, IconItem } from '../services/curriculum';
 import GeometricOrb from './GeometricOrb';
 import AuraCaptions from './AuraCaptions';
 
@@ -18,16 +16,11 @@ interface RealtimeSessionProps {
   character?: CharacterName;
 }
 
-type LoopState = 'listening' | 'thinking' | 'speaking' | 'error';
+type LoopState = 'listening' | 'speaking' | 'error' | 'connecting';
 
-// VAD — tuned to NOT cut off mid-sentence
-const SILENCE_THRESHOLD = 0.12;
-const SILENCE_DURATION_MS = 2000;
-const MIN_AUDIO_MS = 800;
-
-const RealtimeSession: React.FC<RealtimeSessionProps> = ({ onExit, onFinish, selectedLanguage, character = 'aura' }) => {
-  const [loopState, setLoopState] = useState<LoopState>('listening');
-  const [caption, setCaption] = useState('');
+const RealtimeSession: React.FC<RealtimeSessionProps> = ({ onExit, onFinish, character = 'aura' }) => {
+  const [loopState, setLoopState] = useState<LoopState>('connecting');
+  const [userCaption, setUserCaption] = useState('');
   const [auraText, setAuraText] = useState('');
   const [sessionDuration, setSessionDuration] = useState(0);
   const [wordsPracticed, setWordsPracticed] = useState(0);
@@ -36,18 +29,168 @@ const RealtimeSession: React.FC<RealtimeSessionProps> = ({ onExit, onFinish, sel
 
   const charInfo = CHARACTERS[character] || CHARACTERS.aura;
 
-  const streamRef = useRef<MediaStream | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
+  const clientRef = useRef<GeminiLiveClient | null>(null);
   const isMountedRef = useRef(true);
-  const historyRef = useRef<Array<{ role: string; content: string }>>([]);
   const startTimeRef = useRef(Date.now());
+
+  // Audio playback queue
+  const audioQueueRef = useRef<Float32Array[]>([]);
+  const isPlayingRef = useRef(false);
+  const playbackCtxRef = useRef<AudioContext | null>(null);
+  const scheduledTimeRef = useRef(0);
+
+  // VAD state
+  const isUserSpeakingRef = useRef(false);
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
-  const speakingStartRef = useRef(0);
-  const isProcessingRef = useRef(false);
+  const silenceStartRef = useRef(0);
+
+  const SILENCE_THRESHOLD = 0.08;
+  const SILENCE_DURATION_MS = 1200;
+
+  // ─── Audio Playback ────────────────────────────────────────────────────────
+
+  const playAudioChunk = useCallback((base64Data: string) => {
+    if (!playbackCtxRef.current) {
+      playbackCtxRef.current = new AudioContext({ sampleRate: 24000 });
+      scheduledTimeRef.current = 0;
+    }
+
+    const ctx = playbackCtxRef.current;
+    const binary = atob(base64Data);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+
+    // PCM 16-bit signed → Float32
+    const samples = new Float32Array(bytes.length / 2);
+    const view = new DataView(bytes.buffer);
+    for (let i = 0; i < samples.length; i++) {
+      samples[i] = view.getInt16(i * 2, true) / 32768;
+    }
+
+    const buffer = ctx.createBuffer(1, samples.length, 24000);
+    buffer.getChannelData(0).set(samples);
+
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(ctx.destination);
+
+    const now = ctx.currentTime;
+    const start = Math.max(now, scheduledTimeRef.current);
+    source.start(start);
+    scheduledTimeRef.current = start + buffer.duration;
+  }, []);
+
+  // ─── Audio Capture ─────────────────────────────────────────────────────────
+
+  const startListening = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          channelCount: 1,
+          sampleRate: 16000,
+        },
+      });
+
+      streamRef.current = stream;
+
+      const audioCtx = new AudioContext({ sampleRate: 16000 });
+      audioCtxRef.current = audioCtx;
+
+      const source = audioCtx.createMediaStreamSource(stream);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 512;
+      analyser.smoothingTimeConstant = 0.3;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+
+      // ScriptProcessor for PCM capture (simpler than AudioWorklet for this use case)
+      const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+      source.connect(processor);
+      processor.connect(audioCtx.destination);
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+      processor.onaudioprocess = (e) => {
+        if (!isMountedRef.current) return;
+
+        // VAD analysis
+        analyser.getByteFrequencyData(dataArray);
+        const avg = dataArray.reduce((a, b) => a + b) / dataArray.length;
+        const normalized = Math.min(avg / 128, 1);
+        setCurrentAmplitude(normalized);
+        Amplitude.setMic(normalized / 2);
+
+        const isSpeaking = normalized > SILENCE_THRESHOLD;
+
+        if (isSpeaking) {
+          if (silenceStartRef.current > 0) silenceStartRef.current = 0;
+          if (!isUserSpeakingRef.current) {
+            isUserSpeakingRef.current = true;
+            clientRef.current?.activityStart();
+          }
+        } else {
+          if (silenceStartRef.current === 0 && isUserSpeakingRef.current) {
+            silenceStartRef.current = Date.now();
+            if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+            silenceTimerRef.current = setTimeout(() => {
+              if (isMountedRef.current && isUserSpeakingRef.current) {
+                isUserSpeakingRef.current = false;
+                silenceStartRef.current = 0;
+                clientRef.current?.activityEnd();
+              }
+            }, SILENCE_DURATION_MS);
+          }
+        }
+
+        // Send audio if speaking
+        if (isUserSpeakingRef.current) {
+          const inputData = e.inputBuffer.getChannelData(0);
+          const pcm = new Int16Array(inputData.length);
+          for (let i = 0; i < inputData.length; i++) {
+            pcm[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32767));
+          }
+          clientRef.current?.sendAudioChunk(pcm);
+        }
+      };
+
+      setLoopState('listening');
+    } catch {
+      if (isMountedRef.current) {
+        setErrorMsg('Microfone não acessível. Verifique as permissões.');
+        setLoopState('error');
+      }
+    }
+  }, []);
+
+  const stopAll = useCallback(() => {
+    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop());
+      streamRef.current = null;
+    }
+    if (audioCtxRef.current) {
+      audioCtxRef.current.close();
+      audioCtxRef.current = null;
+    }
+    if (playbackCtxRef.current) {
+      playbackCtxRef.current.close();
+      playbackCtxRef.current = null;
+    }
+    scheduledTimeRef.current = 0;
+    audioQueueRef.current = [];
+    isPlayingRef.current = false;
+    isUserSpeakingRef.current = false;
+  }, []);
+
+  // ─── Gemini Live Client ────────────────────────────────────────────────────
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -57,173 +200,78 @@ const RealtimeSession: React.FC<RealtimeSessionProps> = ({ onExit, onFinish, sel
       if (isMountedRef.current) setSessionDuration(prev => prev + 0.1);
     }, 100);
 
-    startListening();
+    const client = new GeminiLiveClient();
+    clientRef.current = client;
+
+    client.on('ready', () => {
+      console.log('[Session] Gemini ready, starting mic');
+      startListening();
+    });
+
+    client.on('audio_chunk', (base64Data) => {
+      if (!isMountedRef.current) return;
+      playAudioChunk(base64Data);
+    });
+
+    client.on('speaking_start', () => {
+      if (!isMountedRef.current) return;
+      setLoopState('speaking');
+      SoundService.playClick();
+    });
+
+    client.on('speaking_end', () => {
+      if (!isMountedRef.current) return;
+      setLoopState('listening');
+      setAuraText('');
+    });
+
+    client.on('transcription', (text, source) => {
+      if (!isMountedRef.current) return;
+      if (source === 'model') {
+        setAuraText(prev => prev + text);
+      } else {
+        setUserCaption(text);
+      }
+    });
+
+    client.on('interrupted', () => {
+      if (!isMountedRef.current) return;
+      setLoopState('listening');
+    });
+
+    client.on('error', (message) => {
+      if (!isMountedRef.current) return;
+      setErrorMsg(message);
+      setLoopState('error');
+    });
+
+    client.on('close', () => {
+      if (!isMountedRef.current) return;
+      setLoopState('connecting');
+    });
+
+    client.connect(character);
 
     return () => {
       isMountedRef.current = false;
       clearInterval(timer);
+      client.disconnect();
       stopAll();
     };
   }, []);
 
-  const stopAll = useCallback(() => {
-    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-    if (recorderRef.current && recorderRef.current.state !== 'inactive') recorderRef.current.stop();
-    if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null; }
-    if (audioCtxRef.current) { audioCtxRef.current.close(); audioCtxRef.current = null; }
-    if (audioPlayerRef.current) { audioPlayerRef.current.pause(); audioPlayerRef.current = null; }
-  }, []);
-
-  const startListening = useCallback(async () => {
-    if (!isMountedRef.current || isProcessingRef.current) return;
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
-      });
-
-      streamRef.current = stream;
-
-      const audioCtx = new AudioContext();
-      audioCtxRef.current = audioCtx;
-      const source = audioCtx.createMediaStreamSource(stream);
-      const analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 512;
-      analyser.smoothingTimeConstant = 0.3;
-      source.connect(analyser);
-      analyserRef.current = analyser;
-
-      const dataArray = new Uint8Array(analyser.frequencyBinCount);
-      let silenceStart = 0;
-
-      const checkVAD = () => {
-        if (!isMountedRef.current) return;
-        analyser.getByteFrequencyData(dataArray);
-        const avg = dataArray.reduce((a, b) => a + b) / dataArray.length;
-        const normalized = Math.min(avg / 128, 1);
-        setCurrentAmplitude(normalized);
-        Amplitude.setMic(normalized / 2);
-
-        if (normalized > SILENCE_THRESHOLD) {
-          if (silenceStart === 0) speakingStartRef.current = Date.now();
-          silenceStart = 0;
-        } else if (silenceStart === 0 && Date.now() - speakingStartRef.current > MIN_AUDIO_MS) {
-          silenceStart = Date.now();
-          if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-          silenceTimerRef.current = setTimeout(() => {
-            if (isMountedRef.current && !isProcessingRef.current) {
-              stopRecordingAndProcess();
-            }
-          }, SILENCE_DURATION_MS);
-        }
-
-        requestAnimationFrame(checkVAD);
-      };
-      checkVAD();
-
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
-      const recorder = new MediaRecorder(stream, { mimeType });
-      chunksRef.current = [];
-      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
-      recorderRef.current = recorder;
-      recorder.start(100);
-      setLoopState('listening');
-      setCaption('');
-    } catch {
-      if (isMountedRef.current) {
-        setErrorMsg('Microfone não acessível. Verifique as permissões.');
-        setLoopState('error');
-      }
-    }
-  }, []);
-
-  const stopRecordingAndProcess = useCallback(async () => {
-    if (isProcessingRef.current || !recorderRef.current) return;
-    isProcessingRef.current = true;
-    stopAll();
-
-    const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
-    console.log(`[VAD] Audio blob size: ${audioBlob.size} bytes, chunks: ${chunksRef.current.length}`);
-
-    if (audioBlob.size < 500) {
-      console.log('[VAD] Audio too short, restarting listen');
-      isProcessingRef.current = false;
-      if (isMountedRef.current) startListening();
-      return;
-    }
-
-    setLoopState('thinking');
-    SoundService.playClick();
-
-    try {
-      const result: ConverseResponse = await GroqPipeline.converse(audioBlob, historyRef.current, character);
-
-      if (!isMountedRef.current) return;
-
-      setCaption(result.transcricao_aluno);
-      historyRef.current.push({ role: 'user', content: result.transcricao_aluno });
-      setAuraText(result.resposta_texto_aura);
-      historyRef.current.push({ role: 'assistant', content: result.resposta_texto_aura });
-      setWordsPracticed(prev => prev + 1);
-
-      if (result.audio_url_ou_base64) {
-        setLoopState('speaking');
-        const audio = new Audio(`data:audio/mp3;base64,${result.audio_url_ou_base64}`);
-        audioPlayerRef.current = audio;
-
-        audio.onended = () => {
-          audioPlayerRef.current = null;
-          if (isMountedRef.current) {
-            isProcessingRef.current = false;
-            setAuraText('');
-            startListening();
-          }
-        };
-
-        audio.onerror = () => {
-          audioPlayerRef.current = null;
-          if (isMountedRef.current) {
-            isProcessingRef.current = false;
-            setAuraText('');
-            startListening();
-          }
-        };
-
-        await audio.play();
-      } else {
-        isProcessingRef.current = false;
-        if (isMountedRef.current) {
-          setAuraText('');
-          startListening();
-        }
-      }
-    } catch (err: any) {
-      if (isMountedRef.current) {
-        setErrorMsg(err.message || 'Falha na comunicação.');
-        setLoopState('error');
-        isProcessingRef.current = false;
-      }
-    }
-  }, [startListening, stopAll, character]);
-
   const handleFinish = useCallback(() => {
     stopAll();
+    clientRef.current?.disconnect();
     onFinish({
       durationSeconds: sessionDuration,
       wordsPracticed,
       accuracyRate: 100,
       flowRating: wordsPracticed > 10 ? 'GODLIKE' : wordsPracticed > 5 ? 'SOLID' : 'DEVELOPING',
-      difficultyLevel: MemorySystem.getDifficultyLevel(),
       aiBrief: `Session complete! ${wordsPracticed} exchanges.`,
       timestamp: Date.now(),
     });
   }, [sessionDuration, wordsPracticed, onFinish, stopAll]);
-
-  const getOrbState = (): 'idle' | 'listening' | 'speaking' => {
-    if (loopState === 'listening') return 'listening';
-    if (loopState === 'speaking') return 'speaking';
-    return 'idle';
-  };
 
   return (
     <div className="flex flex-col items-center justify-center h-full w-full relative overflow-hidden bg-transparent">
@@ -243,18 +291,18 @@ const RealtimeSession: React.FC<RealtimeSessionProps> = ({ onExit, onFinish, sel
       {/* Exit */}
       <button onClick={handleFinish} className="absolute top-3 right-3 z-[120] bg-black/60 backdrop-blur text-white border border-white/20 px-3 py-1.5 text-[10px] font-bold rounded-full hover:bg-white/10 transition-all">FINISH →</button>
 
-      {/* Orb with character colors */}
+      {/* Orb */}
       <GeometricOrb
-        state={getOrbState()}
+        state={loopState === 'listening' ? 'listening' : loopState === 'speaking' ? 'speaking' : 'idle'}
         amplitude={currentAmplitude}
         character={character}
       />
 
       {/* User caption */}
-      {caption && (
+      {userCaption && (
         <div className="absolute z-40 flex justify-center px-4 pointer-events-none" style={{ bottom: '140px', left: '50%', transform: 'translateX(-50%)', width: 'calc(100% - 32px)' }}>
           <div className="w-full max-w-lg bg-black/50 backdrop-blur-sm rounded-lg overflow-hidden">
-            <AuraCaptions text={caption} isActive={!!caption} />
+            <AuraCaptions text={userCaption} isActive={!!userCaption} />
           </div>
         </div>
       )}
@@ -271,16 +319,16 @@ const RealtimeSession: React.FC<RealtimeSessionProps> = ({ onExit, onFinish, sel
 
       {/* State indicator */}
       <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-50">
+        {loopState === 'connecting' && (
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: charInfo.color, borderTopColor: 'transparent' }} />
+            <span className="text-[10px] font-mono uppercase tracking-widest" style={{ color: charInfo.color }}>Connecting...</span>
+          </div>
+        )}
         {loopState === 'listening' && (
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: charInfo.orbListening }} />
             <span className="text-[10px] font-mono uppercase tracking-widest" style={{ color: charInfo.orbListening }}>Listening...</span>
-          </div>
-        )}
-        {loopState === 'thinking' && (
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: charInfo.color, borderTopColor: 'transparent' }} />
-            <span className="text-[10px] font-mono uppercase tracking-widest" style={{ color: charInfo.color }}>Thinking...</span>
           </div>
         )}
         {loopState === 'speaking' && (

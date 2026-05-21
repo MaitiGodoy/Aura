@@ -11,7 +11,7 @@ export interface ConverseResponse {
   character?: string;
 }
 
-export type CharacterName = 'aura' | 'icon' | 'amos';
+export type CharacterName = 'aura' | 'icon' | 'amos' | 'gaucho';
 
 export interface CharacterInfo {
   name: CharacterName;
@@ -54,6 +54,16 @@ export const CHARACTERS: Record<CharacterName, CharacterInfo> = {
     orbSpeaking: 'rgba(236, 72, 153, 0.9)',
     orbIdle: 'rgba(255, 182, 193, 0.5)',
     description: 'Spaced Repetition',
+  },
+  gaucho: {
+    name: 'gaucho',
+    label: 'GAÚCHA',
+    color: '#FF8C00',
+    accentColor: '#FFA500',
+    orbListening: 'rgba(255, 140, 0, 0.9)',
+    orbSpeaking: 'rgba(255, 165, 0, 0.9)',
+    orbIdle: 'rgba(255, 140, 0, 0.5)',
+    description: 'Gaúcha Mode',
   },
 };
 

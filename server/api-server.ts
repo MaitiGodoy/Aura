@@ -1,12 +1,12 @@
 /**
- * Aura API Server — Natural Brazilian Portuguese + ElevenLabs TTS
+ * Aura API Server — Natural Brazilian Portuguese + OpenAI TTS
  *
  * Characters:
- * - Aura: Female, Brazilian teacher — ElevenLabs "Rachel" voice
- * - iCON: Male, carioca (Rio) — ElevenLabs "Antoni" voice
- * - AMOS: Female, mineira (Minas) — ElevenLabs "Bella" voice
+ * - Aura: Female — OpenAI "nova" voice
+ * - iCON: Male, carioca — OpenAI "onyx" voice
+ * - AMOS: Female, mineira — OpenAI "shimmer" voice
  *
- * TTS: ElevenLabs eleven_multilingual_v2 — indistinguishable from human speech
+ * TTS: OpenAI tts-1 — natural, $15/1M chars (~$0.0015 por resposta)
  * STT: Groq Whisper Turbo
  * LLM: Groq Llama 3.1 8B Instant
  */
@@ -20,34 +20,24 @@ import { join } from 'path';
 import { writeFile, unlink, readFile } from 'fs/promises';
 import { randomUUID } from 'crypto';
 
-// ─── Config ──────────────────────────────────────────────────────────────────
-
 const PORT = parseInt(process.env.PORT || '8080', 10);
 const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
-const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY || '';
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const GROQ_ENDPOINT = 'https://api.groq.com/openai/v1';
-const ELEVENLABS_ENDPOINT = 'https://api.elevenlabs.io/v1';
+const OPENAI_ENDPOINT = 'https://api.openai.com/v1';
 
 const STT_MODEL = 'whisper-large-v3-turbo';
 const LLM_MODEL = 'llama-3.1-8b-instant';
-const TTS_MODEL = 'eleven_multilingual_v2';
-
-// ─── Character System ────────────────────────────────────────────────────────
+const TTS_MODEL = 'tts-1';
 
 interface CharacterConfig {
-  voiceId: string;
+  voice: string;
   systemPrompt: string;
-  voiceSettings: {
-    stability: number;
-    similarityBoost: number;
-    style: number;
-  };
 }
 
 const CHARACTERS: Record<string, CharacterConfig> = {
   aura: {
-    voiceId: '21m00Tcm4TlvDq8ikWAM',
-    voiceSettings: { stability: 0.5, similarityBoost: 0.8, style: 0.2 },
+    voice: 'nova',
     systemPrompt: `Você é Aura, uma professora de inglês brasileira. Você fala PORTUGUÊS BRASILEIRO o tempo todo, com frases em inglês misturadas naturalmente.
 
 REGRA PRINCIPAL: SEMPRE responda em português brasileiro. Use inglês APENAS para ensinar palavras/frases específicas.
@@ -67,8 +57,7 @@ REGRAS:
 TOM: Direta, prática, calorosa. Como uma amiga que te ensina inglês.`,
   },
   icon: {
-    voiceId: 'pNInz6ob7DYSrtmYbDnL',
-    voiceSettings: { stability: 0.4, similarityBoost: 0.85, style: 0.3 },
+    voice: 'onyx',
     systemPrompt: `Você é iCON, um professor de inglês CARIOCA do Rio de Janeiro. Você fala PORTUGUÊS BRASILEIRO com sotaque e gírias cariocas.
 
 REGRA PRINCIPAL: SEMPRE responda em português brasileiro com gírias cariocas. Use inglês APENAS para ensinar frases.
@@ -91,8 +80,7 @@ REGRAS:
 TOM: Descontraído, carioca raiz, amigo que ensina. Usa "cara", "mano", "tá ligado" naturalmente.`,
   },
   amos: {
-    voiceId: 'EXAVITh4vr4yRbJXh',
-    voiceSettings: { stability: 0.55, similarityBoost: 0.75, style: 0.15 },
+    voice: 'shimmer',
     systemPrompt: `Você é AMOS, uma professora de inglês MINEIRA de Minas Gerais. Você fala PORTUGUÊS BRASILEIRO com sotaque e expressões mineiras.
 
 REGRA PRINCIPAL: SEMPRE responda em português brasileiro com expressões mineiras. Use inglês APENAS para ensinar frases.
@@ -117,11 +105,9 @@ TOM: Acolhedora, mineira raiz, paciente. Usa "uai", "trem", "sô" naturalmente.`
 };
 
 const DEFAULT_CHARACTER = 'aura';
-
 const STT_TIMEOUT_MS = 4000;
 const LLM_TIMEOUT_MS = 6000;
-const TTS_TIMEOUT_MS = 10000;
-
+const TTS_TIMEOUT_MS = 8000;
 const MAX_HISTORY = 4;
 const MAX_TOKENS = 80;
 
@@ -130,12 +116,11 @@ if (!GROQ_API_KEY) {
   process.exit(1);
 }
 
-if (!ELEVENLABS_API_KEY) {
-  console.error('FATAL: ELEVENLABS_API_KEY environment variable is required');
+if (!OPENAI_API_KEY) {
+  console.error('FATAL: OPENAI_API_KEY environment variable is required');
+  console.error('Get one at: https://platform.openai.com/api-keys');
   process.exit(1);
 }
-
-// ─── App ─────────────────────────────────────────────────────────────────────
 
 const app = express();
 const httpServer = createServer(app);
@@ -167,10 +152,8 @@ const upload = multer({
 app.use(express.json({ limit: '1mb' }));
 
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', uptime: process.uptime(), models: { stt: STT_MODEL, llm: LLM_MODEL, tts: 'ElevenLabs ' + TTS_MODEL }, characters: Object.keys(CHARACTERS) });
+  res.json({ status: 'ok', uptime: process.uptime(), models: { stt: STT_MODEL, llm: LLM_MODEL, tts: 'OpenAI ' + TTS_MODEL }, characters: Object.keys(CHARACTERS) });
 });
-
-// ─── Main Endpoint ───────────────────────────────────────────────────────────
 
 app.post('/api/converse', upload.single('audio'), async (req, res) => {
   const startTime = Date.now();
@@ -184,12 +167,10 @@ app.post('/api/converse', upload.single('audio'), async (req, res) => {
     const rawHistory = req.body.history ? JSON.parse(req.body.history) : [];
     const characterName = req.body.character || DEFAULT_CHARACTER;
     const character = CHARACTERS[characterName] || CHARACTERS[DEFAULT_CHARACTER];
-
     const conversationHistory = rawHistory.slice(-MAX_HISTORY);
 
     console.log(`[Pipeline] Character: ${characterName}, Audio: ${audioFile.size} bytes`);
 
-    // 1. STT
     const t1 = Date.now();
     const transcription = await transcribeAudio(audioFile.buffer, audioFile.mimetype, audioFile.originalname);
     console.log(`[STT] ${Date.now() - t1}ms: "${transcription}"`);
@@ -204,7 +185,6 @@ app.post('/api/converse', upload.single('audio'), async (req, res) => {
       });
     }
 
-    // 2. LLM + 3. TTS
     const messages = [
       { role: 'system', content: character.systemPrompt },
       ...conversationHistory,
@@ -231,8 +211,6 @@ app.post('/api/converse', upload.single('audio'), async (req, res) => {
     });
   }
 });
-
-// ─── STT: Groq Whisper Turbo ────────────────────────────────────────────────
 
 async function transcribeAudio(
   audioBuffer: Buffer,
@@ -285,8 +263,6 @@ async function transcribeAudio(
   }
 }
 
-// ─── LLM + TTS ──────────────────────────────────────────────────────────────
-
 async function generateAndSpeak(
   messages: Array<{ role: string; content: string }>,
   character: CharacterConfig,
@@ -330,29 +306,24 @@ async function generateAndSpeak(
   return { text, audioBase64 };
 }
 
-// ─── TTS: ElevenLabs ────────────────────────────────────────────────────────
-
 async function textToSpeech(text: string, character: CharacterConfig): Promise<string> {
   const { default: fetch } = await import('node-fetch');
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), TTS_TIMEOUT_MS);
 
-  const response = await fetch(`${ELEVENLABS_ENDPOINT}/text-to-speech/${character.voiceId}`, {
+  const response = await fetch(`${OPENAI_ENDPOINT}/audio/speech`, {
     method: 'POST',
     headers: {
-      'xi-api-key': ELEVENLABS_API_KEY,
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      text,
-      model_id: TTS_MODEL,
-      voice_settings: {
-        stability: character.voiceSettings.stability,
-        similarity_boost: character.voiceSettings.similarityBoost,
-        style: character.voiceSettings.style,
-        use_speaker_boost: true,
-      },
+      model: TTS_MODEL,
+      input: text,
+      voice: character.voice,
+      response_format: 'mp3',
+      speed: 1.0,
     }),
     signal: controller.signal,
   });
@@ -361,14 +332,12 @@ async function textToSpeech(text: string, character: CharacterConfig): Promise<s
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`ElevenLabs TTS ${response.status}: ${errorText}`);
+    throw new Error(`OpenAI TTS ${response.status}: ${errorText}`);
   }
 
   const audioBuffer = Buffer.from(await response.arrayBuffer());
   return audioBuffer.toString('base64');
 }
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
 
 function mimeTypeToExtension(mimeType: string, originalName: string): string {
   const map: Record<string, string> = {
@@ -390,8 +359,6 @@ function mimeTypeToContentType(mimeType: string): string {
   return map[mimeType] || 'audio/webm';
 }
 
-// ─── Error Handler ──────────────────────────────────────────────────────────
-
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   if (err instanceof multer.MulterError) {
     if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'File too large. Max 10MB.' });
@@ -401,17 +368,15 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
   res.status(500).json({ error: 'Internal server error' });
 });
 
-// ─── Start ──────────────────────────────────────────────────────────────────
-
 httpServer.listen(PORT, () => {
   console.log(`\n╔══════════════════════════════════════════════════════════╗`);
-  console.log(`║  AURA API — ElevenLabs Natural Voices Pipeline          ║`);
+  console.log(`║  AURA API — OpenAI TTS Pipeline                       ║`);
   console.log(`║  POST /api/converse                                   ║`);
   console.log(`║  GET  /health                                         ║`);
   console.log(`║  Port: ${PORT}                                           ║`);
   console.log(`║  STT: ${STT_MODEL} (Turbo)                                ║`);
   console.log(`║  LLM: ${LLM_MODEL} (8B Instant)                           ║`);
-  console.log(`║  TTS: ElevenLabs ${TTS_MODEL}                           ║`);
+  console.log(`║  TTS: OpenAI ${TTS_MODEL} ($15/1M chars)                   ║`);
   console.log(`║  Characters: ${Object.keys(CHARACTERS).join(', ')}                   ║`);
   console.log(`║  Max tokens: ${MAX_TOKENS} (short responses)                 ║`);
   console.log(`╚══════════════════════════════════════════════════════════╝\n`);

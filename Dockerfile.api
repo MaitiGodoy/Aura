@@ -4,4 +4,4 @@ COPY server/package*.json ./
 RUN npm ci
 COPY server/ .
 EXPOSE 8080
-CMD ["npx", "tsx", "api-server.ts"]
+CMD ["npx", "tsx", "gemini-live-server.ts"]

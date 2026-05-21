@@ -49,6 +49,16 @@ const ModuleHub: React.FC<Props> = ({ selectedLanguage, onLanguageChange, onSele
       color: CHARACTERS.amos.color,
       icon: '◇',
     },
+    {
+      id: 'GAÚCHA',
+      title: 'GAÚCHA',
+      subtitle: 'Gaúcha Mode',
+      description: 'Bah tchê! Learn English with a gaúcha.',
+      mode: 'FREE_TALK' as LiveGameMode,
+      character: 'gaucho' as CharacterName,
+      color: CHARACTERS.gaucho.color,
+      icon: '☆',
+    },
   ];
 
   if (showCurriculum) {
