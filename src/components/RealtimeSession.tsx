@@ -1,7 +1,8 @@
-/** RealtimeSession — Conversação em tempo real com Groq STT + LLM + Browser TTS */
+/** RealtimeSession — Conversação em tempo real com Gemini Live API */
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { CharacterName, CHARACTERS } from '../services/groqPipeline';
+import { GeminiLiveClient } from '../services/geminiLiveClient';
 import { SoundService } from '../services/soundEffects';
 import { Amplitude } from '../services/amplitudeStore';
 import GeometricOrb from './GeometricOrb';
@@ -15,190 +16,79 @@ interface RealtimeSessionProps {
   character?: CharacterName;
 }
 
-type LoopState = 'listening' | 'speaking' | 'error' | 'connecting';
-
-const GROQ_API_KEY = import.meta.env.VITE_GROQ_API_KEY || '';
-const GROQ_STT_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
-const GROQ_CHAT_URL = 'https://api.groq.com/openai/v1/chat/completions';
+type LoopState = 'listening' | 'speaking' | 'error' | 'connecting' | 'idle';
 
 const RealtimeSession: React.FC<RealtimeSessionProps> = ({ onExit, onFinish, character = 'aura' }) => {
-  const [loopState, setLoopState] = useState<LoopState>('connecting');
+  const [loopState, setLoopState] = useState<LoopState>('idle');
   const [userCaption, setUserCaption] = useState('');
-  const [auraText, setAuraText] = useState('');
+  const [auraCaption, setAuraCaption] = useState('');
   const [sessionDuration, setSessionDuration] = useState(0);
   const [wordsPracticed, setWordsPracticed] = useState(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [currentAmplitude, setCurrentAmplitude] = useState(0);
+  const [audioEnabled, setAudioEnabled] = useState(false);
 
   const charInfo = CHARACTERS[character] || CHARACTERS.aura;
 
-  // Refs for audio processing
   const audioCtxRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const clientRef = useRef<GeminiLiveClient | null>(null);
   const isMountedRef = useRef(true);
-  const conversationHistoryRef = useRef<Array<{role: string, content: string}>>([]);
-  const loopStateRef = useRef<LoopState>('connecting');
-  const isProcessingRef = useRef(false);
+  const startTimeRef = useRef(Date.now());
 
-  // VAD refs
+  // Audio playback queue
+  const audioQueueRef = useRef<Float32Array[]>([]);
+  const isPlayingRef = useRef(false);
+  const playbackCtxRef = useRef<AudioContext | null>(null);
+  const scheduledTimeRef = useRef(0);
+
+  // VAD state
   const isUserSpeakingRef = useRef(false);
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const silenceStartRef = useRef(0);
-  const audioChunksRef = useRef<Int16Array[]>([]);
 
-  const SILENCE_THRESHOLD = 0.06;
-  const SILENCE_DURATION_MS = 800;
+  const SILENCE_THRESHOLD = 0.08;
+  const SILENCE_DURATION_MS = 1200;
 
-  // Keep ref in sync with state
-  useEffect(() => { loopStateRef.current = loopState; }, [loopState]);
+  // ─── Audio Playback ────────────────────────────────────────────────────────
 
-  // ─── PCM to WAV converter ─────────────────────────────────────────────────
-
-  const pcmToWav = (pcmData: Int16Array, sampleRate: number): Blob => {
-    const buffer = new ArrayBuffer(44 + pcmData.length * 2);
-    const view = new DataView(buffer);
-    const writeString = (offset: number, str: string) => {
-      for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
-    };
-    writeString(0, 'RIFF');
-    view.setUint32(4, 36 + pcmData.length * 2, true);
-    writeString(8, 'WAVE');
-    writeString(12, 'fmt ');
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true);
-    view.setUint16(22, 1, true);
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate * 2, true);
-    view.setUint16(32, 2, true);
-    view.setUint16(34, 16, true);
-    writeString(36, 'data');
-    view.setUint32(40, pcmData.length * 2, true);
-    for (let i = 0; i < pcmData.length; i++) view.setInt16(44 + i * 2, pcmData[i], true);
-    return new Blob([buffer], { type: 'audio/wav' });
-  };
-
-  // ─── STT: Send audio to Groq Whisper ───────────────────────────────────────
-
-  const processUserAudio = useCallback(async () => {
-    if (audioChunksRef.current.length === 0 || isProcessingRef.current) return;
-    isProcessingRef.current = true;
-
-    const totalLength = audioChunksRef.current.reduce((acc, chunk) => acc + chunk.length, 0);
-    const combined = new Int16Array(totalLength);
-    let offset = 0;
-    for (const chunk of audioChunksRef.current) {
-      combined.set(chunk, offset);
-      offset += chunk.length;
+  const playAudioChunk = useCallback((base64Data: string) => {
+    if (!playbackCtxRef.current) {
+      playbackCtxRef.current = new AudioContext({ sampleRate: 24000 });
+      scheduledTimeRef.current = 0;
     }
 
-    const wavBlob = pcmToWav(combined, 16000);
-    audioChunksRef.current = [];
-
-    try {
-      setLoopState('connecting');
-
-      const formData = new FormData();
-      formData.append('file', wavBlob, 'audio.wav');
-      formData.append('model', 'whisper-large-v3');
-      formData.append('language', 'pt');
-
-      const response = await fetch(GROQ_STT_URL, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${GROQ_API_KEY}` },
-        body: formData,
-      });
-
-      if (!response.ok) throw new Error(`STT error: ${response.status}`);
-
-      const data = await response.json();
-      const userText = data.text?.trim();
-
-      if (!userText) {
-        setLoopState('listening');
-        isProcessingRef.current = false;
-        return;
-      }
-
-      setUserCaption(userText);
-      setWordsPracticed(prev => prev + 1);
-
-      // Get AI response
-      conversationHistoryRef.current.push({ role: 'user', content: userText });
-
-      const chatResponse = await fetch(GROQ_CHAT_URL, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${GROQ_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'llama-3.1-70b-versatile',
-          messages: [
-            { role: 'system', content: charInfo.systemPrompt },
-            ...conversationHistoryRef.current.slice(-10),
-          ],
-          max_tokens: 300,
-          temperature: 0.8,
-        }),
-      });
-
-      if (!chatResponse.ok) throw new Error(`LLM error: ${chatResponse.status}`);
-
-      const chatData = await chatResponse.json();
-      const aiResponse = chatData.choices?.[0]?.message?.content?.trim();
-
-      if (!aiResponse) {
-        setLoopState('listening');
-        isProcessingRef.current = false;
-        return;
-      }
-
-      conversationHistoryRef.current.push({ role: 'assistant', content: aiResponse });
-      setAuraText(aiResponse);
-
-      // Speak using browser TTS
-      setLoopState('speaking');
-      SoundService.playClick();
-      window.speechSynthesis.cancel();
-
-      const utterance = new SpeechSynthesisUtterance(aiResponse);
-      utterance.lang = 'pt-BR';
-      utterance.rate = 1.0;
-
-      const voices = window.speechSynthesis.getVoices();
-      const ptBrVoice = voices.find(v => v.lang.startsWith('pt-BR') || v.lang.startsWith('pt_BR'));
-      if (ptBrVoice) utterance.voice = ptBrVoice;
-
-      utterance.onend = () => {
-        if (isMountedRef.current) {
-          setLoopState('listening');
-          setAuraText('');
-          isProcessingRef.current = false;
-        }
-      };
-
-      utterance.onerror = () => {
-        if (isMountedRef.current) {
-          setLoopState('listening');
-          isProcessingRef.current = false;
-        }
-      };
-
-      window.speechSynthesis.speak(utterance);
-    } catch (err) {
-      console.error('[Pipeline] Error:', err);
-      if (isMountedRef.current) {
-        setErrorMsg('Erro no processamento. Tentando novamente...');
-        setLoopState('listening');
-      }
-      isProcessingRef.current = false;
+    const ctx = playbackCtxRef.current;
+    const binary = atob(base64Data);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
     }
-  }, [charInfo]);
 
-  // ─── Audio Capture Setup ──────────────────────────────────────────────────
+    // PCM 16-bit signed → Float32
+    const samples = new Float32Array(bytes.length / 2);
+    const view = new DataView(bytes.buffer);
+    for (let i = 0; i < samples.length; i++) {
+      samples[i] = view.getInt16(i * 2, true) / 32768;
+    }
 
-  const setupMic = useCallback(async () => {
+    const buffer = ctx.createBuffer(1, samples.length, 24000);
+    buffer.getChannelData(0).set(samples);
+
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(ctx.destination);
+
+    const now = ctx.currentTime;
+    const start = Math.max(now, scheduledTimeRef.current);
+    source.start(start);
+    scheduledTimeRef.current = start + buffer.duration;
+  }, []);
+
+  // ─── Audio Capture ─────────────────────────────────────────────────────────
+
+  const startListening = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -211,7 +101,6 @@ const RealtimeSession: React.FC<RealtimeSessionProps> = ({ onExit, onFinish, cha
       });
 
       streamRef.current = stream;
-      audioChunksRef.current = [];
 
       const audioCtx = new AudioContext({ sampleRate: 16000 });
       audioCtxRef.current = audioCtx;
@@ -221,17 +110,19 @@ const RealtimeSession: React.FC<RealtimeSessionProps> = ({ onExit, onFinish, cha
       analyser.fftSize = 512;
       analyser.smoothingTimeConstant = 0.3;
       source.connect(analyser);
+      analyserRef.current = analyser;
 
+      // ScriptProcessor for PCM capture
       const processor = audioCtx.createScriptProcessor(4096, 1, 1);
       source.connect(processor);
       processor.connect(audioCtx.destination);
-      processorRef.current = processor;
 
       const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
       processor.onaudioprocess = (e) => {
         if (!isMountedRef.current) return;
 
+        // VAD analysis
         analyser.getByteFrequencyData(dataArray);
         const avg = dataArray.reduce((a, b) => a + b) / dataArray.length;
         const normalized = Math.min(avg / 128, 1);
@@ -239,22 +130,12 @@ const RealtimeSession: React.FC<RealtimeSessionProps> = ({ onExit, onFinish, cha
         Amplitude.setMic(normalized / 2);
 
         const isSpeaking = normalized > SILENCE_THRESHOLD;
-        const currentState = loopStateRef.current;
 
         if (isSpeaking) {
           if (silenceStartRef.current > 0) silenceStartRef.current = 0;
           if (!isUserSpeakingRef.current) {
             isUserSpeakingRef.current = true;
-            audioChunksRef.current = [];
-          }
-          // Record audio chunks while listening and not processing
-          if (currentState === 'listening' && !isProcessingRef.current) {
-            const inputData = e.inputBuffer.getChannelData(0);
-            const pcm = new Int16Array(inputData.length);
-            for (let i = 0; i < inputData.length; i++) {
-              pcm[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32767));
-            }
-            audioChunksRef.current.push(pcm);
+            clientRef.current?.activityStart();
           }
         } else {
           if (silenceStartRef.current === 0 && isUserSpeakingRef.current) {
@@ -264,10 +145,20 @@ const RealtimeSession: React.FC<RealtimeSessionProps> = ({ onExit, onFinish, cha
               if (isMountedRef.current && isUserSpeakingRef.current) {
                 isUserSpeakingRef.current = false;
                 silenceStartRef.current = 0;
-                processUserAudio();
+                clientRef.current?.activityEnd();
               }
             }, SILENCE_DURATION_MS);
           }
+        }
+
+        // Send audio if speaking
+        if (isUserSpeakingRef.current) {
+          const inputData = e.inputBuffer.getChannelData(0);
+          const pcm = new Int16Array(inputData.length);
+          for (let i = 0; i < inputData.length; i++) {
+            pcm[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32767));
+          }
+          clientRef.current?.sendAudioChunk(pcm);
         }
       };
 
@@ -278,7 +169,7 @@ const RealtimeSession: React.FC<RealtimeSessionProps> = ({ onExit, onFinish, cha
         setLoopState('error');
       }
     }
-  }, [processUserAudio]);
+  }, []);
 
   const stopAll = useCallback(() => {
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
@@ -290,44 +181,98 @@ const RealtimeSession: React.FC<RealtimeSessionProps> = ({ onExit, onFinish, cha
       audioCtxRef.current.close();
       audioCtxRef.current = null;
     }
-    if (processorRef.current) {
-      processorRef.current.disconnect();
-      processorRef.current = null;
+    if (playbackCtxRef.current) {
+      playbackCtxRef.current.close();
+      playbackCtxRef.current = null;
     }
-    window.speechSynthesis.cancel();
+    scheduledTimeRef.current = 0;
+    audioQueueRef.current = [];
+    isPlayingRef.current = false;
     isUserSpeakingRef.current = false;
-    isProcessingRef.current = false;
   }, []);
 
-  // ─── Init ─────────────────────────────────────────────────────────────────
+  // ─── Enable Audio (user interaction required for playback) ─────────────────
+
+  const enableAudio = useCallback(() => {
+    setAudioEnabled(true);
+  }, []);
+
+  // ─── Gemini Live Client ────────────────────────────────────────────────────
 
   useEffect(() => {
+    if (!audioEnabled) return;
     isMountedRef.current = true;
+    startTimeRef.current = Date.now();
 
     const timer = setInterval(() => {
       if (isMountedRef.current) setSessionDuration(prev => prev + 0.1);
     }, 100);
 
-    // Load voices
-    window.speechSynthesis.getVoices();
-    window.speechSynthesis.onvoiceschanged = () => { window.speechSynthesis.getVoices(); };
+    const client = new GeminiLiveClient();
+    clientRef.current = client;
 
-    conversationHistoryRef.current = [];
+    client.on('ready', () => {
+      console.log('[Session] Gemini ready, starting mic');
+      startListening();
+    });
 
-    const initTimer = setTimeout(() => {
-      if (isMountedRef.current) setupMic();
-    }, 500);
+    client.on('audio_chunk', (base64Data) => {
+      if (!isMountedRef.current) return;
+      playAudioChunk(base64Data);
+    });
+
+    client.on('speaking_start', () => {
+      if (!isMountedRef.current) return;
+      setLoopState('speaking');
+      SoundService.playClick();
+    });
+
+    client.on('speaking_end', () => {
+      if (!isMountedRef.current) return;
+      setLoopState('listening');
+      // Clear captions after turn ends
+      setUserCaption('');
+      setAuraCaption('');
+    });
+
+    client.on('transcription', (text, source) => {
+      if (!isMountedRef.current) return;
+      if (source === 'model') {
+        setAuraCaption(prev => prev + text);
+      } else {
+        setUserCaption(prev => prev + text);
+      }
+    });
+
+    client.on('interrupted', () => {
+      if (!isMountedRef.current) return;
+      setLoopState('listening');
+    });
+
+    client.on('error', (message) => {
+      if (!isMountedRef.current) return;
+      setErrorMsg(message);
+      setLoopState('error');
+    });
+
+    client.on('close', () => {
+      if (!isMountedRef.current) return;
+      setLoopState('connecting');
+    });
+
+    client.connect(character);
 
     return () => {
       isMountedRef.current = false;
       clearInterval(timer);
-      clearTimeout(initTimer);
+      client.disconnect();
       stopAll();
     };
-  }, []);
+  }, [audioEnabled, character, startListening, playAudioChunk, stopAll]);
 
   const handleFinish = useCallback(() => {
     stopAll();
+    clientRef.current?.disconnect();
     onFinish({
       durationSeconds: sessionDuration,
       wordsPracticed,
@@ -337,6 +282,23 @@ const RealtimeSession: React.FC<RealtimeSessionProps> = ({ onExit, onFinish, cha
       timestamp: Date.now(),
     });
   }, [sessionDuration, wordsPracticed, stopAll]);
+
+  // ─── Audio Enable Overlay ─────────────────────────────────────────────────
+
+  if (!audioEnabled) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full w-full bg-black/80">
+        <button
+          onClick={enableAudio}
+          className="px-8 py-4 rounded-full text-white font-bold text-lg transition-all hover:scale-105"
+          style={{ background: `linear-gradient(135deg, ${charInfo.color}, ${charInfo.accentColor})` }}
+        >
+          Clique para Ativar o Áudio
+        </button>
+        <p className="text-gray-400 text-sm mt-4">Necessário para habilitar o áudio do navegador</p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col items-center justify-center h-full w-full relative overflow-hidden bg-transparent">
@@ -364,20 +326,20 @@ const RealtimeSession: React.FC<RealtimeSessionProps> = ({ onExit, onFinish, cha
       />
 
       {/* User caption */}
-      {userCaption && (
+      {userCaption && loopState !== 'listening' && (
         <div className="absolute z-40 flex justify-center px-4 pointer-events-none" style={{ bottom: '140px', left: '50%', transform: 'translateX(-50%)', width: 'calc(100% - 32px)' }}>
           <div className="w-full max-w-lg bg-black/50 backdrop-blur-sm rounded-lg overflow-hidden">
-            <AuraCaptions text={userCaption} isActive={!!userCaption} />
+            <AuraCaptions text={userCaption} isActive={false} />
           </div>
         </div>
       )}
 
       {/* Aura response */}
-      {auraText && loopState !== 'listening' && (
+      {auraCaption && loopState !== 'listening' && (
         <div className="absolute z-40 flex justify-center px-4 pointer-events-none" style={{ bottom: '80px', left: '50%', transform: 'translateX(-50%)', width: 'calc(100% - 32px)' }}>
           <div className="w-full max-w-lg backdrop-blur-sm rounded-lg p-3 border" style={{ backgroundColor: `${charInfo.color}10`, borderColor: `${charInfo.color}30` }}>
             <div className="text-[9px] font-mono uppercase tracking-widest mb-1" style={{ color: charInfo.color }}>{charInfo.label}</div>
-            <div className="text-sm text-white/90 leading-relaxed">{auraText}</div>
+            <div className="text-sm text-white/90 leading-relaxed">{auraCaption}</div>
           </div>
         </div>
       )}
@@ -387,7 +349,7 @@ const RealtimeSession: React.FC<RealtimeSessionProps> = ({ onExit, onFinish, cha
         {loopState === 'connecting' && (
           <div className="flex items-center gap-2">
             <div className="w-4 h-4 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: charInfo.color, borderTopColor: 'transparent' }} />
-            <span className="text-[10px] font-mono uppercase tracking-widest" style={{ color: charInfo.color }}>Processing...</span>
+            <span className="text-[10px] font-mono uppercase tracking-widest" style={{ color: charInfo.color }}>Connecting...</span>
           </div>
         )}
         {loopState === 'listening' && (
@@ -405,7 +367,7 @@ const RealtimeSession: React.FC<RealtimeSessionProps> = ({ onExit, onFinish, cha
         {loopState === 'error' && (
           <div className="text-center">
             <div className="text-red-400 text-sm mb-2">{errorMsg}</div>
-            <button onClick={() => { setErrorMsg(null); setupMic(); }} className="text-[10px] font-mono text-red-300 underline">Retry</button>
+            <button onClick={() => { setErrorMsg(null); startListening(); }} className="text-[10px] font-mono text-red-300 underline">Retry</button>
           </div>
         )}
       </div>

@@ -17,7 +17,7 @@ import { randomUUID } from 'crypto';
 
 const PORT = parseInt(process.env.PORT || '8080', 10);
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '';
-const MODEL = 'gemini-3.1-flash-live-preview';
+const MODEL = 'gemini-2.5-flash-native-audio-latest';
 
 if (!GEMINI_API_KEY) {
   console.error('FATAL: GEMINI_API_KEY environment variable is required');
@@ -161,7 +161,7 @@ wss.on('connection', (clientWs, req) => {
     // Send setup message — Developer API format
     const setup = {
       setup: {
-        model: MODEL,
+        model: `models/${MODEL}`,
         generation_config: {
           response_modalities: ['AUDIO'],
           speech_config: {
