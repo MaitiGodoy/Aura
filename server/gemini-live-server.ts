@@ -17,7 +17,7 @@ import { randomUUID } from 'crypto';
 
 const PORT = parseInt(process.env.PORT || '8080', 10);
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '';
-const MODEL = 'gemini-3.1-flash-live';
+const MODEL = 'gemini-3.1-flash-live-preview';
 
 if (!GEMINI_API_KEY) {
   console.error('FATAL: GEMINI_API_KEY environment variable is required');
@@ -54,7 +54,7 @@ TOM: Direta, prática, calorosa. Como uma amiga que te ensina inglês.`,
   },
   icon: {
     voiceName: 'Puck',
-    systemPrompt: `Você é iCON, um professor de inglês CARIOCA do Rio de Janeiro. Você fala PORTUGUÊS BRASILEIRO com sotaque e gírias cariocas.
+    systemPrompt: `Você é iCON, um professor de inglês CARIOCA do Rio de Janeiro. Você é um HOMEM. Fala PORTUGUÊS BRASILEIRO com sotaque e gírias cariocas.
 
 REGRA PRINCIPAL: SEMPRE responda em português brasileiro com gírias cariocas. Use inglês APENAS para ensinar frases.
 
@@ -77,7 +77,7 @@ TOM: Descontraído, carioca raiz, amigo que ensina.`,
   },
   amos: {
     voiceName: 'Kore',
-    systemPrompt: `Você é AMOS, uma professora de inglês MINEIRA de Minas Gerais. Você fala PORTUGUÊS BRASILEIRO com sotaque e expressões mineiras.
+    systemPrompt: `Você é AMOS, uma professora de inglês MINEIRA de Minas Gerais. Você é uma MULHER. Fala PORTUGUÊS BRASILEIRO com sotaque e expressões mineiras.
 
 REGRA PRINCIPAL: SEMPRE responda em português brasileiro com expressões mineiras. Use inglês APENAS para ensinar frases.
 
@@ -100,7 +100,7 @@ TOM: Acolhedora, mineira raiz, paciente.`,
   },
   gaucho: {
     voiceName: 'Leda',
-    systemPrompt: `Você é GAÚCHA, uma professora de inglês do Rio Grande do Sul. Você é uma mulher gaúcha, campeira, direta e acolhedora. Fala PORTUGUÊS BRASILEIRO com sotaque e expressões gaúchas.
+    systemPrompt: `Você é GAÚCHA, uma professora de inglês do Rio Grande do Sul. Você é uma MULHER gaúcha, campeira, direta e acolhedora. Fala PORTUGUÊS BRASILEIRO com sotaque e expressões gaúchas.
 
 REGRA PRINCIPAL: SEMPRE responda em português brasileiro com expressões gaúchas. Use inglês APENAS para ensinar frases.
 
@@ -141,16 +141,15 @@ wss.on('connection', (clientWs, req) => {
   const sessionId = randomUUID().slice(0, 8);
   console.log(`[WS] Client connected: ${sessionId}`);
 
-  // Parse character from query string
   const url = new URL(req.url || '', `http://${req.headers.host}`);
   const characterName = url.searchParams.get('character') || 'aura';
   const character = CHARACTERS[characterName] || CHARACTERS.aura;
 
   console.log(`[WS] Character: ${characterName}, Voice: ${character.voiceName}`);
 
-  // Connect to Gemini Live API
+  // Connect to Gemini Live API (Developer API endpoint)
   const geminiWs = new WebSocket(
-    `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${GEMINI_API_KEY}`,
+    `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${GEMINI_API_KEY}`,
   );
 
   let geminiReady = false;
@@ -159,7 +158,7 @@ wss.on('connection', (clientWs, req) => {
   geminiWs.on('open', () => {
     console.log(`[Gemini] Connected: ${sessionId}`);
 
-    // Send setup message
+    // Send setup message — Developer API format
     const setup = {
       setup: {
         model: MODEL,
@@ -179,26 +178,43 @@ wss.on('connection', (clientWs, req) => {
       },
     };
 
+    console.log(`[Gemini] Sending setup for ${sessionId}`);
     geminiWs.send(JSON.stringify(setup));
-    geminiReady = true;
   });
 
   geminiWs.on('message', (data) => {
     try {
       const message = JSON.parse(data.toString());
 
-      // Audio output from Gemini
+      // Log all messages for debugging
+      console.log(`[Gemini] Message: ${sessionId}`, JSON.stringify(message).substring(0, 200));
+
+      // Setup complete
+      if (message.setupComplete) {
+        console.log(`[Gemini] Setup complete: ${sessionId}`);
+        geminiReady = true;
+        clientWs.send(JSON.stringify({ type: 'ready' }));
+        return;
+      }
+
+      // Error from Gemini
+      if (message.error) {
+        console.error(`[Gemini] Error: ${sessionId}`, JSON.stringify(message.error));
+        clientWs.send(JSON.stringify({ type: 'error', message: message.error.message || 'Gemini error' }));
+        return;
+      }
+
+      // Audio/text output from Gemini
       if (message.serverContent) {
         const content = message.serverContent;
 
         // Model started generating
-        if (content.modelTurn?.parts?.[0]?.inlineData) {
-          isGenerating = true;
-          clientWs.send(JSON.stringify({ type: 'speaking_start' }));
-        }
+        if (content.modelTurn?.parts?.length > 0) {
+          if (!isGenerating) {
+            isGenerating = true;
+            clientWs.send(JSON.stringify({ type: 'speaking_start' }));
+          }
 
-        // Audio chunks (base64 PCM 24kHz)
-        if (content.modelTurn?.parts) {
           for (const part of content.modelTurn.parts) {
             if (part.inlineData?.data) {
               clientWs.send(JSON.stringify({
@@ -217,47 +233,40 @@ wss.on('connection', (clientWs, req) => {
           }
         }
 
-        // Model finished (turn complete)
+        // Model finished
         if (content.turnComplete) {
           isGenerating = false;
           clientWs.send(JSON.stringify({ type: 'speaking_end' }));
         }
 
-        // Interruption handling
+        // Interruption
         if (content.interrupted) {
           isGenerating = false;
           clientWs.send(JSON.stringify({ type: 'interrupted' }));
         }
       }
-
-      // Input transcription
-      if (message.setupComplete) {
-        console.log(`[Gemini] Setup complete: ${sessionId}`);
-        clientWs.send(JSON.stringify({ type: 'ready' }));
-      }
     } catch (err) {
-      console.error(`[Gemini] Parse error:`, err);
+      console.error(`[Gemini] Parse error: ${sessionId}`, err);
     }
   });
 
   geminiWs.on('error', (err) => {
     console.error(`[Gemini] Error: ${sessionId}`, err.message);
-    clientWs.send(JSON.stringify({ type: 'error', message: err.message }));
+    clientWs.send(JSON.stringify({ type: 'error', message: `Gemini connection error: ${err.message}` }));
   });
 
-  geminiWs.on('close', () => {
-    console.log(`[Gemini] Disconnected: ${sessionId}`);
+  geminiWs.on('close', (code, reason) => {
+    console.log(`[Gemini] Disconnected: ${sessionId} code=${code} reason=${reason.toString()}`);
   });
 
   // Handle messages from frontend
   clientWs.on('message', (data) => {
-    if (!geminiReady || geminiWs.readyState !== WebSocket.OPEN) return;
+    if (geminiWs.readyState !== WebSocket.OPEN) return;
 
     try {
       const message = JSON.parse(data.toString());
 
       if (message.type === 'audio_chunk' && message.data) {
-        // Forward PCM audio to Gemini
         geminiWs.send(JSON.stringify({
           realtime_input: {
             media_chunks: [{
@@ -287,7 +296,6 @@ wss.on('connection', (clientWs, req) => {
       }
 
       if (message.type === 'interrupt') {
-        // Send activity end to interrupt Gemini
         geminiWs.send(JSON.stringify({
           client_content: {
             turns: [{ role: 'user', parts: [] }],
@@ -305,7 +313,7 @@ wss.on('connection', (clientWs, req) => {
         }));
       }
     } catch (err) {
-      console.error(`[WS] Parse error:`, err);
+      console.error(`[WS] Parse error: ${sessionId}`, err);
     }
   });
 
@@ -329,7 +337,7 @@ httpServer.listen(PORT, () => {
   console.log(`║  WebSocket: ws://localhost:${PORT}                          ║`);
   console.log(`║  GET  /health                                         ║`);
   console.log(`║  Port: ${PORT}                                           ║`);
-  console.log(`║  Model: ${MODEL}                               ║`);
+  console.log(`║  Model: ${MODEL}           ║`);
   console.log(`║  Characters: ${Object.keys(CHARACTERS).join(', ')}                   ║`);
   console.log(`║  Voices: ${Object.values(CHARACTERS).map(c => c.voiceName).join(', ')}             ║`);
   console.log(`╚══════════════════════════════════════════════════════════╝\n`);
