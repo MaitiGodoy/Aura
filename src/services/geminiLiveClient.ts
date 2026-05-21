@@ -26,7 +26,7 @@ const CHARACTERS: Record<CharacterName, CharacterConfig> = {
     systemPrompt: `Você é AMOS, uma professora de inglês MINEIRA. Você é uma MULHER. Fale PORTUGUÊS BRASILEIRO com expressões mineiras ("uai", "trem", "sô", "nossa", "benzinho", "trem bão"). SEMPRE responda em português com expressões mineiras. Respostas CURTAS: 1-2 frases, depois faz uma pergunta. NUNCA use termos gramaticais. Sempre termine com uma pergunta.`,
   },
   gaucho: {
-    voiceName: 'Leda',
+    voiceName: 'Aoede',
     systemPrompt: `Você é GAÚCHA, uma professora de inglês do Rio Grande do Sul. Você é uma MULHER gaúcha. Fale PORTUGUÊS BRASILEIRO com expressões gaúchas ("bah", "tchê", "tri", "guri", "capaz", "tri legal"). SEMPRE responda em português com expressões gaúchas. Respostas CURTAS: 1-2 frases, depois faz uma pergunta. NUNCA use termos gramaticais. Sempre termine com uma pergunta.`,
   },
 };
@@ -49,6 +49,7 @@ export class GeminiLiveClient {
   private character: CharacterName = 'aura';
   private isConnecting = false;
   private isGenerating = false;
+  private audioChunkCount = 0;
 
   on<K extends keyof GeminiLiveClientEvents>(event: K, callback: GeminiLiveClientEvents[K]) {
     this.events[event] = callback;
@@ -56,6 +57,7 @@ export class GeminiLiveClient {
 
   connect(character: CharacterName = 'aura') {
     this.character = character;
+    this.audioChunkCount = 0;
     this.connectWs();
   }
 
@@ -64,12 +66,14 @@ export class GeminiLiveClient {
     this.isConnecting = true;
 
     console.log('[GeminiLive] Connecting directly to Gemini Live API');
+    console.log('[GeminiLive] Model:', MODEL);
+    console.log('[GeminiLive] Voice:', CHARACTERS[this.character].voiceName);
 
     this.ws = new WebSocket(WS_URL);
-    this.ws.binaryType = 'blob';
+    this.ws.binaryType = 'arraybuffer';
 
     this.ws.onopen = () => {
-      console.log('[GeminiLive] Connected to Gemini');
+      console.log('[GeminiLive] WebSocket connected');
       this.isConnecting = false;
 
       const characterConfig = CHARACTERS[this.character];
@@ -92,20 +96,23 @@ export class GeminiLiveClient {
         },
       };
 
-      console.log('[GeminiLive] Sending setup with voice:', characterConfig.voiceName);
+      console.log('[GeminiLive] Sending setup:', JSON.stringify(setup).substring(0, 200));
       this.ws!.send(JSON.stringify(setup));
     };
 
     this.ws.onmessage = async (event) => {
-      // Handle binary audio data (Blob)
-      if (event.data instanceof Blob) {
-        const arrayBuffer = await event.data.arrayBuffer();
-        const bytes = new Uint8Array(arrayBuffer);
+      // Handle binary audio data (ArrayBuffer)
+      if (event.data instanceof ArrayBuffer) {
+        const bytes = new Uint8Array(event.data);
         let binary = '';
         for (let i = 0; i < bytes.length; i++) {
           binary += String.fromCharCode(bytes[i]);
         }
         const base64 = btoa(binary);
+        this.audioChunkCount++;
+        if (this.audioChunkCount % 50 === 0) {
+          console.log(`[GeminiLive] Audio chunk #${this.audioChunkCount}, size: ${bytes.length} bytes`);
+        }
         this.events.audio_chunk?.(base64);
         return;
       }
@@ -115,7 +122,7 @@ export class GeminiLiveClient {
         const msg = JSON.parse(event.data);
 
         if (msg.setupComplete) {
-          console.log('[GeminiLive] Setup complete — ready for audio');
+          console.log('[GeminiLive] Setup complete — ready for audio streaming');
           this.events.ready?.();
           return;
         }
@@ -131,6 +138,7 @@ export class GeminiLiveClient {
 
           // Transcription from Gemini (user speech)
           if (content.inputTranscription?.text) {
+            console.log('[GeminiLive] User transcription:', content.inputTranscription.text);
             this.events.transcription?.(content.inputTranscription.text, 'user');
           }
 
@@ -143,6 +151,7 @@ export class GeminiLiveClient {
           if (content.modelTurn?.parts?.length > 0) {
             if (!this.isGenerating) {
               this.isGenerating = true;
+              console.log('[GeminiLive] Model started speaking');
               this.events.speaking_start?.();
             }
 
@@ -158,11 +167,13 @@ export class GeminiLiveClient {
 
           if (content.turnComplete) {
             this.isGenerating = false;
+            console.log('[GeminiLive] Model finished speaking');
             this.events.speaking_end?.();
           }
 
           if (content.interrupted) {
             this.isGenerating = false;
+            console.log('[GeminiLive] Model interrupted');
             this.events.interrupted?.();
           }
         }
@@ -171,8 +182,8 @@ export class GeminiLiveClient {
       }
     };
 
-    this.ws.onclose = () => {
-      console.log('[GeminiLive] Disconnected');
+    this.ws.onclose = (e) => {
+      console.log('[GeminiLive] Disconnected:', e.code, e.reason);
       this.isConnecting = false;
       this.isGenerating = false;
       this.events.close?.();
@@ -181,7 +192,8 @@ export class GeminiLiveClient {
       this.reconnectTimer = setTimeout(() => this.connectWs(), 2000);
     };
 
-    this.ws.onerror = () => {
+    this.ws.onerror = (e) => {
+      console.error('[GeminiLive] WebSocket error:', e);
       this.isConnecting = false;
     };
   }

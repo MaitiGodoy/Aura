@@ -43,9 +43,8 @@ const RealtimeSession: React.FC<RealtimeSessionProps> = ({ onExit, onFinish, cha
   const scheduledTimeRef = useRef(0);
   const isGeminiSpeakingRef = useRef(false);
 
-  // VAD for interruption detection only (not for gating audio)
+  // VAD for interruption detection only
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const silenceStartRef = useRef(0);
   const isUserSpeakingRef = useRef(false);
 
   const SILENCE_THRESHOLD = 0.03;
@@ -80,7 +79,7 @@ const RealtimeSession: React.FC<RealtimeSessionProps> = ({ onExit, onFinish, cha
       source.connect(analyser);
       analyserRef.current = analyser;
 
-      // VAD visualization loop (always running)
+      // VAD visualization loop
       const dataArray = new Uint8Array(analyser.frequencyBinCount);
       const vadLoop = () => {
         if (!isMountedRef.current || !analyserRef.current) return;
@@ -114,7 +113,7 @@ const RealtimeSession: React.FC<RealtimeSessionProps> = ({ onExit, onFinish, cha
     const processor = audioCtx.createScriptProcessor(4096, 1, 1);
     const source = audioCtx.createMediaStreamSource(streamRef.current!);
 
-    // Muted gain to avoid feedback loop (audio goes to Gemini, not to speakers)
+    // Muted gain to avoid feedback loop
     const mutedGain = audioCtx.createGain();
     mutedGain.gain.value = 0;
 
@@ -128,33 +127,29 @@ const RealtimeSession: React.FC<RealtimeSessionProps> = ({ onExit, onFinish, cha
     processor.onaudioprocess = (e) => {
       if (!isMountedRef.current) return;
 
-      // VAD analysis (for interruption detection + amplitude visualization)
+      // VAD analysis
       analyserRef.current!.getByteFrequencyData(dataArray);
       const avg = dataArray.reduce((a, b) => a + b) / dataArray.length;
       const normalized = Math.min(avg / 128, 1);
 
       const isSpeaking = normalized > SILENCE_THRESHOLD;
 
-      // Interruption detection: if Gemini is speaking and user starts talking
+      // Interruption detection
       if (isSpeaking && isGeminiSpeakingRef.current) {
-        if (silenceStartRef.current > 0) silenceStartRef.current = 0;
         if (!isUserSpeakingRef.current) {
           isUserSpeakingRef.current = true;
-          console.log('[VAD] User started speaking while Gemini is talking — will interrupt');
+          console.log('[VAD] User speaking while Gemini is talking — will interrupt');
         }
-        // Start silence timer for interruption
         if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
         silenceTimerRef.current = setTimeout(() => {
           if (isMountedRef.current && isUserSpeakingRef.current && isGeminiSpeakingRef.current) {
-            console.log('[VAD] User spoke long enough — interrupting Gemini');
+            console.log('[VAD] Interrupting Gemini');
             clientRef.current?.interrupt();
             isUserSpeakingRef.current = false;
           }
         }, INTERRUPT_SILENCE_MS);
       } else if (!isSpeaking) {
-        if (silenceStartRef.current === 0 && isUserSpeakingRef.current) {
-          silenceStartRef.current = Date.now();
-        }
+        isUserSpeakingRef.current = false;
       }
 
       // ALWAYS send audio chunks to Gemini — no gating

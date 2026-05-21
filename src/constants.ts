@@ -227,5 +227,7 @@ export const MODEL_NAMES = {
   CHAT: 'gemini-2.5-flash', 
   IMAGE: 'gemini-2.5-flash',
   TTS: 'gemini-2.5-flash',
+  /* GROQ desativado — mantido como comentário
   GROQ: 'llama-3.3-70b-versatile'
+  */
 };
